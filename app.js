@@ -333,7 +333,7 @@ function renderHarian() {
                     <span class="text-slate-800 font-semibold text-sm truncate">${item.nama}</span>
                     <span class="text-[10px] border px-2 py-0.5 rounded-md font-bold uppercase tracking-wider ${badgeColor}">${item.status}</span>
                 </div>
-                <div class="text-slate-500 text-xs font-medium truncate">${item.tanggal} • ${item.waktu} ${item.alasan ? '• ' + item.alasan : ''}</div>
+                <div class="text-slate-500 text-xs font-medium truncate">${item.tanggal} • ${item.waktu} ${item.alasan ? '• ' + item.alasan : ''} ${item.agenda ? '• Agenda: ' + item.agenda : ''}</div>
             </div>
         </div>`;
     });
@@ -578,7 +578,7 @@ function renderDetailSiswa() {
                     <span class="text-slate-800 font-semibold text-sm truncate">${item.tanggal} • ${item.waktu}</span>
                     <span class="text-[10px] border px-2 py-0.5 rounded-md font-bold uppercase tracking-wider ${badgeColor}">${item.status}</span>
                 </div>
-                <div class="text-slate-500 text-xs font-medium">${item.alasan ? 'Alasan: ' + item.alasan : 'Lokasi: ' + (item.lat ? item.lat+','+item.lng : '-')}</div>
+                <div class="text-slate-500 text-xs font-medium">${item.alasan ? 'Alasan: ' + item.alasan : 'Lokasi: ' + (item.lat ? item.lat+','+item.lng : '-')} ${item.agenda ? '<br>Agenda: ' + item.agenda : ''}</div>
             </div>
         </div>`;
     });
@@ -724,14 +724,14 @@ function renderJurnalGuru() {
     let html = '';
     sorted.forEach(entry => {
         const photoCount = entry.photoCount || 0;
-        const progressPct = Math.round((photoCount / 3) * 100);
-        const progressColor = photoCount >= 3 ? 'bg-emerald-500' : photoCount >= 2 ? 'bg-amber-500' : 'bg-rose-500';
+        const progressPct = Math.round((photoCount / 2) * 100);
+        const progressColor = photoCount >= 2 ? 'bg-emerald-500' : 'bg-amber-500';
         
         // Photo gallery
         let photosHtml = '';
         const photoUrls = entry.photoUrls || [];
         if (photoUrls.length > 0) {
-            photosHtml = `<div class="grid grid-cols-3 gap-2 mt-3">`;
+            photosHtml = `<div class="grid grid-cols-2 gap-2 mt-3">`;
             photoUrls.forEach((url, i) => {
                 let thumbUrl = url;
                 if (url && url.includes('drive.google.com/file/d/')) {
@@ -763,7 +763,7 @@ function renderJurnalGuru() {
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-1 flex-wrap">
                             <span class="text-xs font-bold text-primary bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 truncate">${entry.nama}</span>
-                            <span class="text-[10px] ${progressColor.replace('bg-','text-').replace('500','600')} ${progressColor.replace('500','50')} border ${progressColor.replace('bg-','border-').replace('500','200')} px-2 py-0.5 rounded-md font-bold">${photoCount}/3 Foto</span>
+                            <span class="text-[10px] ${progressColor.replace('bg-','text-').replace('500','600')} ${progressColor.replace('500','50')} border ${progressColor.replace('bg-','border-').replace('500','200')} px-2 py-0.5 rounded-md font-bold">${photoCount}/2 Foto</span>
                         </div>
                         <p class="text-sm font-bold text-slate-800">${entry.weekStart || ''} — ${entry.weekEnd || ''}</p>
                     </div>
