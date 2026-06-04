@@ -167,10 +167,27 @@ function switchTab(tabId) {
 }
 
 // Fetch Data
-async function fetchData(namaGuru) {
+let currentLoadedMonth = null;
+
+async function fetchData(namaGuru, bulan = null) {
+    if (!bulan) {
+        const now = new Date();
+        bulan = (now.getMonth() + 1).toString();
+    }
+    
+    // Skip fetching if we already have 'all' data, or if we already have this exact month's data
+    if (currentLoadedMonth === 'all' && bulan !== 'all') {
+        renderCurrentTab();
+        return;
+    }
+    if (currentLoadedMonth === bulan) {
+        renderCurrentTab();
+        return;
+    }
+
     loadingOverlay.classList.remove('hidden');
     try {
-        const url = `${GOOGLE_SCRIPT_URL}?action=getRekapGuru&namaGuru=${encodeURIComponent(namaGuru)}&bulan=all`;
+        const url = `${GOOGLE_SCRIPT_URL}?action=getRekapGuru&namaGuru=${encodeURIComponent(namaGuru)}&bulan=${bulan}`;
         const res = await fetch(url);
         const result = await res.json();
         
@@ -195,10 +212,12 @@ async function fetchData(namaGuru) {
                 selectJurnalSiswa.appendChild(opt2);
             });
             
+            
             renderCurrentTab();
+            currentLoadedMonth = bulan;
             
             // Fetch jurnal data
-            fetchJurnalGuru(namaGuru);
+            fetchJurnalGuru(namaGuru, bulan);
         } else {
             showToast(result.message, "error");
         }
@@ -690,9 +709,9 @@ function renderDetailPsgInfo(nisn) {
 }
 
 // ===== JURNAL GURU LOGIC =====
-async function fetchJurnalGuru(namaGuru) {
+async function fetchJurnalGuru(namaGuru, bulan = 'all') {
     try {
-        const url = `${GOOGLE_SCRIPT_URL}?action=getJurnalGuru&namaGuru=${encodeURIComponent(namaGuru)}`;
+        const url = `${GOOGLE_SCRIPT_URL}?action=getJurnalGuru&namaGuru=${encodeURIComponent(namaGuru)}&bulan=${bulan}`;
         const res = await fetch(url);
         const result = await res.json();
         if (result.status === 'success') {
@@ -819,16 +838,36 @@ filterPeriodik.addEventListener('change', (e) => {
     const val = e.target.value;
     weekSelector.classList.toggle('hidden', val !== 'week');
     monthSelector.classList.toggle('hidden', val !== 'month');
-    renderPeriodik();
+    
+    if (val === 'all') {
+        const namaGuru = localStorage.getItem('nama_guru');
+        fetchData(namaGuru, 'all');
+    } else {
+        renderPeriodik();
+    }
 });
 weekSelector.addEventListener('change', renderPeriodik);
-monthSelector.addEventListener('change', renderPeriodik);
+monthSelector.addEventListener('change', (e) => {
+    if (currentLoadedMonth !== 'all') {
+        const m = e.target.value.split('-')[1].replace(/^0+/, '');
+        fetchData(localStorage.getItem('nama_guru'), m);
+    } else {
+        renderPeriodik();
+    }
+});
 
 selectDetailSiswa.addEventListener('change', () => {
     renderDetailSiswa();
     renderDetailPsgInfo(selectDetailSiswa.value);
 });
-detailMonthSelector.addEventListener('change', renderDetailSiswa);
+detailMonthSelector.addEventListener('change', (e) => {
+    if (currentLoadedMonth !== 'all') {
+        const m = e.target.value.split('-')[1].replace(/^0+/, '');
+        fetchData(localStorage.getItem('nama_guru'), m);
+    } else {
+        renderDetailSiswa();
+    }
+});
 
 document.getElementById('selectJurnalSiswa').addEventListener('change', renderJurnalGuru);
 
