@@ -982,7 +982,7 @@ async function generateJurnalPrintView(nisn, fetchedJurnalData = null) {
     let pageItems = [];
     if (studentJurnal.length > 0) {
         studentJurnal.forEach((entry) => {
-            const deskripsi = entry.keterangan || entry.agenda || entry.jurnal || entry.kegiatan || entry.alasan || "-";
+            const rawStr = entry.keterangan || entry.agenda || entry.jurnal || entry.kegiatan || entry.alasan || "-";
             let photoUrls = [];
             if (Array.isArray(entry.photoUrls) && entry.photoUrls.length > 0) {
                 photoUrls = entry.photoUrls;
@@ -990,12 +990,18 @@ async function generateJurnalPrintView(nisn, fetchedJurnalData = null) {
                 photoUrls = [entry.foto];
             }
 
+            // Parse judul spesifik per foto
+            let regexPolaFoto = /(?:foto\s*\d*[\s:\.\-]*)/gi;
+            let titleParts = rawStr.split(regexPolaFoto).map(s => s.trim()).filter(Boolean);
+
             if (photoUrls.length > 0) {
-                photoUrls.forEach((url) => {
-                    pageItems.push({ photoUrl: url, judulKegiatan: deskripsi, rawEntry: entry });
+                photoUrls.forEach((url, idx) => {
+                    let singleTitle = titleParts[idx] || titleParts[0] || rawStr.replace(regexPolaFoto, '').trim() || 'MEMBESIHKAN LINER';
+                    pageItems.push({ photoUrl: url, judulKegiatan: singleTitle, rawEntry: entry });
                 });
             } else {
-                pageItems.push({ photoUrl: null, judulKegiatan: deskripsi, rawEntry: entry });
+                let singleTitle = titleParts[0] || rawStr.replace(regexPolaFoto, '').trim() || 'MEMBESIHKAN LINER';
+                pageItems.push({ photoUrl: null, judulKegiatan: singleTitle, rawEntry: entry });
             }
         });
     }
@@ -1009,15 +1015,7 @@ async function generateJurnalPrintView(nisn, fetchedJurnalData = null) {
 
     for (let p = 0; p < totalPages; p++) {
         const item = pageItems[p];
-        let rawStr = item.judulKegiatan || "";
-        let regexPolaFoto = /(?:foto\s*\d*[\s:\.\-]*)/gi;
-        let parts = rawStr.split(regexPolaFoto).map(s => s.trim()).filter(Boolean);
-        if (parts.length === 0) {
-            let cleaned = rawStr.replace(regexPolaFoto, "").trim();
-            parts = cleaned ? [cleaned] : ["MEMBESIHKAN LINER"];
-        }
-
-        let judulFormatted = parts.map((j, i) => `<div class="font-bold text-slate-900 mb-1">${i + 1}. ${j.toUpperCase()}</div>`).join("");
+        let judulSingle = (item.judulKegiatan || "MEMBESIHKAN LINER").toUpperCase();
 
         let fileId = null;
         if (item.photoUrl) {
@@ -1063,8 +1061,8 @@ async function generateJurnalPrintView(nisn, fetchedJurnalData = null) {
                     <div class="space-y-4">
                         <div class="mb-3">
                             <div class="text-xs font-bold text-slate-900 mb-1">Judul Kegiatan/Pekerjaan :</div>
-                            <div class="text-xs text-slate-900 uppercase tracking-wide leading-snug mb-2">
-                                ${judulFormatted}
+                            <div class="text-xs font-bold text-slate-900 uppercase tracking-wide leading-snug mb-2">
+                                1. ${judulSingle}
                             </div>
                         </div>
 
@@ -1095,3 +1093,265 @@ async function generateJurnalPrintView(nisn, fetchedJurnalData = null) {
 }
 
 
+
+
+// ===== FITUR EXPORT DOCX (MICROSOFT WORD) DENGAN SINGLE TITLE PER PHOTO =====
+async function generateDocxExport(nisn, btnElement) {
+    const docxLib = window.docx || (typeof docx !== "undefined" ? docx : null);
+    const saveAsFn = window.saveAs || (typeof saveAs !== "undefined" ? saveAs : null);
+
+    if (!docxLib) {
+        alert("Library docx belum siap di browser. Pastikan koneksi terhubung dan refresh halaman.");
+        return;
+    }
+
+    const student = (typeof daftarSiswaCache !== "undefined" && daftarSiswaCache.find(s => String(s.nisn) === String(nisn))) || { nisn: nisn, nama: "Siswa_PKL", lokasiPKL: "DUDI", jurusan: "Teknik Kendaraan Ringan" };
+    const namaGuru = localStorage.getItem("nama_guru") || "Guru Pembimbing";
+    const konsentrasiKeahlian = student.jurusan || student.kelas || "Teknik Kendaraan Ringan";
+
+    const originalText = btnElement.innerHTML;
+    btnElement.disabled = true;
+    btnElement.innerHTML = `<i class="ph ph-spinner animate-spin text-base"></i> Menyusun Word...`;
+
+    try {
+        let studentJurnal = [];
+        try {
+            const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getJurnalGuru&namaGuru=${encodeURIComponent(localStorage.getItem('nama_guru')||'')}&bulan=all`);
+            const result = await res.json();
+            if (result.status === 'success' && Array.isArray(result.data)) {
+                studentJurnal = result.data.filter(j => String(j.nisn) === String(nisn));
+            }
+        } catch (err) {
+            console.warn("Gagal tarik live data di Word export, fallback cache", err);
+        }
+        if (studentJurnal.length === 0 && typeof jurnalGuruCache !== "undefined") {
+            studentJurnal = jurnalGuruCache.filter(j => String(j.nisn) === String(nisn));
+        }
+        let pageItems = [];
+
+        if (studentJurnal.length > 0) {
+            studentJurnal.forEach((entry) => {
+                const rawStr = entry.keterangan || entry.agenda || entry.jurnal || entry.kegiatan || entry.alasan || "-";
+                let photoUrls = [];
+                if (Array.isArray(entry.photoUrls) && entry.photoUrls.length > 0) {
+                    photoUrls = entry.photoUrls;
+                } else if (entry.foto) {
+                    photoUrls = [entry.foto];
+                }
+
+                let regexPolaFoto = /(?:foto\s*\d*[\s:\.\-]*)/gi;
+                let titleParts = rawStr.split(regexPolaFoto).map(s => s.trim()).filter(Boolean);
+
+                if (photoUrls.length > 0) {
+                    photoUrls.forEach((url, idx) => {
+                        let singleTitle = titleParts[idx] || titleParts[0] || rawStr.replace(regexPolaFoto, '').trim() || 'MEMBESIHKAN LINER';
+                        pageItems.push({ photoUrl: url, judulKegiatan: singleTitle });
+                    });
+                } else {
+                    let singleTitle = titleParts[0] || rawStr.replace(regexPolaFoto, '').trim() || 'MEMBESIHKAN LINER';
+                    pageItems.push({ photoUrl: null, judulKegiatan: singleTitle });
+                }
+            });
+        }
+
+        if (pageItems.length === 0) {
+            pageItems.push({ photoUrl: null, judulKegiatan: "MEMBESIHKAN LINER" });
+        }
+
+        const { Document, Packer, Paragraph, TextRun, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ImageRun, TabStopType, TabStopPosition, LeaderType } = docxLib;
+        const docSections = [];
+
+        const fetchImageAsUint8Array = async (rawUrl) => {
+            if (!rawUrl) return null;
+            let fileId = null;
+
+            if (rawUrl.includes("/d/")) {
+                const match = rawUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                if (match && match[1]) fileId = match[1];
+            } else if (rawUrl.includes("id=")) {
+                const match = rawUrl.match(/id=([a-zA-Z0-9_-]+)/);
+                if (match && match[1]) fileId = match[1];
+            }
+
+            let candidateUrls = fileId ? [
+                "https://drive.google.com/thumbnail?id=" + fileId + "&sz=w800",
+                "https://lh3.googleusercontent.com/d/" + fileId + "=w800",
+                rawUrl
+            ] : [rawUrl];
+
+            return new Promise((resolve) => {
+                const tryNext = (idx) => {
+                    if (idx >= candidateUrls.length) {
+                        resolve(null);
+                        return;
+                    }
+                    const targetUrl = candidateUrls[idx];
+                    const img = new Image();
+                    img.crossOrigin = "Anonymous";
+                    img.onload = async () => {
+                        const nw = img.naturalWidth || 600;
+                        const nh = img.naturalHeight || 400;
+                        try {
+                            const res = await fetch(targetUrl);
+                            if (res.ok) {
+                                const buf = await res.arrayBuffer();
+                                if (buf && buf.byteLength > 200) {
+                                    resolve({ data: new Uint8Array(buf), type: "jpg", width: nw, height: nh });
+                                    return;
+                                }
+                            }
+                        } catch (e) {}
+
+                        try {
+                            const canvas = document.createElement("canvas");
+                            canvas.width = nw;
+                            canvas.height = nh;
+                            const ctx = canvas.getContext("2d");
+                            ctx.drawImage(img, 0, 0);
+                            canvas.toBlob((blob) => {
+                                if (blob) {
+                                    blob.arrayBuffer().then(buf => resolve({ data: new Uint8Array(buf), type: "png", width: nw, height: nh })).catch(() => tryNext(idx + 1));
+                                } else tryNext(idx + 1);
+                            }, "image/png");
+                        } catch (err) { tryNext(idx + 1); }
+                    };
+                    img.onerror = () => tryNext(idx + 1);
+                    img.src = targetUrl;
+                };
+                tryNext(0);
+            });
+        };
+
+        for (let p = 0; p < pageItems.length; p++) {
+            const item = pageItems[p];
+            let imageElement = null;
+
+            if (item.photoUrl) {
+                const imgResult = await fetchImageAsUint8Array(item.photoUrl);
+                if (imgResult && imgResult.data) {
+                    try {
+                        const maxW = 440;
+                        const maxH = 290;
+                        const srcW = imgResult.width || 600;
+                        const srcH = imgResult.height || 400;
+                        const ratio = Math.min(maxW / srcW, maxH / srcH);
+                        const finalW = Math.round(srcW * ratio);
+                        const finalH = Math.round(srcH * ratio);
+
+                        imageElement = new ImageRun({
+                            data: imgResult.data,
+                            transformation: { width: finalW, height: finalH },
+                            type: imgResult.type || "jpg"
+                        });
+                    } catch (err) {
+                        console.error("Gagal menyusun ImageRun di Word", err);
+                    }
+                }
+            }
+
+            const singleTitle = (item.judulKegiatan || "MEMBESIHKAN LINER").toUpperCase();
+            const judulParagraphs = [
+                new Paragraph({
+                    children: [new TextRun({ text: `1. ${singleTitle}`, bold: true, size: 22 })],
+                    spacing: { after: 60 }
+                })
+            ];
+
+            const noBorders = {
+                top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+                insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" }
+            };
+
+            const identitasTable = new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                borders: noBorders,
+                rows: [
+                    new TableRow({
+                        children: [
+                            new TableCell({ width: { size: 18, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "Nama Siswa", bold: true, size: 20 })] })] }),
+                            new TableCell({ width: { size: 3, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: ":", bold: true, size: 20 })] })] }),
+                            new TableCell({ width: { size: 29, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: (student.nama || "RADITYA EKA JUNAEDI").toUpperCase(), bold: true, size: 20 })] })] }),
+                            new TableCell({ width: { size: 18, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "Tempat PKL / DUDI", bold: true, size: 20 })] })] }),
+                            new TableCell({ width: { size: 3, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: ":", bold: true, size: 20 })] })] }),
+                            new TableCell({ width: { size: 29, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: (student.lokasiPKL || student.dudi || "AA DIESEL").toUpperCase(), size: 20 })] })] })
+                        ]
+                    }),
+                    new TableRow({
+                        children: [
+                            new TableCell({ width: { size: 18, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "Konsentrasi Keahlian", bold: true, size: 20 })] })] }),
+                            new TableCell({ width: { size: 3, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: ":", bold: true, size: 20 })] })] }),
+                            new TableCell({ width: { size: 29, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: konsentrasiKeahlian.toUpperCase(), size: 20 })] })] }),
+                            new TableCell({ width: { size: 18, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "Guru Pembimbing", bold: true, size: 20 })] })] }),
+                            new TableCell({ width: { size: 3, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: ":", bold: true, size: 20 })] })] }),
+                            new TableCell({ width: { size: 29, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: namaGuru.toUpperCase(), size: 20 })] })] })
+                        ]
+                    })
+                ]
+            });
+
+            const photoContentParagraph = imageElement 
+                ? new Paragraph({ children: [imageElement], alignment: AlignmentType.CENTER })
+                : new Paragraph({ children: [new TextRun({ text: "[ Foto Dokumentasi Tidak Dapat Dimuat / Disimpan Local ]", italic: true, color: "888888", size: 20 })], alignment: AlignmentType.CENTER });
+
+            const dottedLinesParagraphs = Array(10).fill(0).map(() => 
+                new Paragraph({
+                    children: [new TextRun({ text: "	" })],
+                    tabStops: [
+                        {
+                            type: TabStopType.RIGHT,
+                            position: TabStopPosition.MAX,
+                            leader: LeaderType.DOT
+                        }
+                    ],
+                    spacing: { after: 140 }
+                })
+            );
+
+            docSections.push({
+                properties: { page: { margin: { top: 1134, bottom: 1134, left: 1134, right: 1134 } } },
+                children: [
+                    new Paragraph({
+                        children: [new TextRun({ text: "LEMBAR KEGIATAN HARIAN PKL", bold: true, size: 32 })],
+                        alignment: AlignmentType.CENTER,
+                        spacing: { after: 300 }
+                    }),
+                    identitasTable,
+                    new Paragraph({ text: "", spacing: { after: 250 } }),
+                    new Paragraph({ children: [new TextRun({ text: "Judul Kegiatan/Pekerjaan :", bold: true, size: 22 })], spacing: { after: 120 } }),
+                    ...judulParagraphs,
+                    new Paragraph({ text: "", spacing: { after: 200 } }),
+                    new Paragraph({ children: [new TextRun({ text: "Dokumentasi Kegiatan/Pekerjaan :", bold: true, size: 22 })], spacing: { after: 120 } }),
+                    photoContentParagraph,
+                    new Paragraph({ text: "", spacing: { after: 250 } }),
+                    new Paragraph({ children: [new TextRun({ text: "Uraian Kegiatan/Pekerjaan :", bold: true, size: 22 })], spacing: { after: 150 } }),
+                    ...dottedLinesParagraphs
+                ]
+            });
+        }
+
+        const doc = new Document({ sections: docSections });
+        const blob = await Packer.toBlob(doc);
+        const fileName = `Lembar_Kegiatan_PKL_${(student.nama || "Siswa").replace(/\s+/g, "_")}.docx`;
+
+        if (saveAsFn) {
+            saveAsFn(blob, fileName);
+        } else {
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    } catch (err) {
+        console.error("Gagal export Word (.docx)", err);
+        alert("Terjadi masalah saat membuat file Word: " + err.message);
+    } finally {
+        btnElement.disabled = false;
+        btnElement.innerHTML = originalText;
+    }
+}
