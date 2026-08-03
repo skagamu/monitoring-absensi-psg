@@ -872,3 +872,226 @@ detailMonthSelector.addEventListener('change', (e) => {
 document.getElementById('selectJurnalSiswa').addEventListener('change', renderJurnalGuru);
 
 document.getElementById('btnExportPdf').addEventListener('click', () => window.print());
+
+
+// ===== FITUR CETAK JURNAL A4 (PEMBIMBING) =====
+document.addEventListener("click", async (e) => {
+    const btn = e.target.closest("#btnCetakJurnal");
+    if (btn) {
+        const selectEl = document.getElementById("selectJurnalSiswa");
+        const selectedNisn = selectEl ? selectEl.value : "";
+        if (!selectedNisn || selectedNisn === "all") {
+            if (typeof showToast === "function") showToast("Silakan pilih siswa terlebih dahulu di dropdown", "error");
+            else alert("Silakan pilih siswa terlebih dahulu di dropdown");
+            return;
+        }
+        
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<i class="ph ph-spinner animate-spin text-lg"></i> Memuat Seluruh Jurnal...`;
+
+        try {
+            const namaGuru = localStorage.getItem('nama_guru') || '';
+            const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getJurnalGuru&namaGuru=${encodeURIComponent(namaGuru)}&bulan=all`);
+            const result = await res.json();
+            let liveJurnalData = [];
+            if (result.status === "success" && Array.isArray(result.data)) {
+                liveJurnalData = result.data.filter(j => String(j.nisn) === String(selectedNisn));
+            }
+            await generateJurnalPrintView(selectedNisn, liveJurnalData);
+        } catch (err) {
+            console.error("Gagal mengambil data jurnal siswa", err);
+            await generateJurnalPrintView(selectedNisn, []);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+
+        const modal = document.getElementById("modalCetakJurnal");
+        if (modal) {
+            modal.classList.remove("hidden");
+            modal.style.display = "flex";
+        }
+    }
+    
+    const closeBtn = e.target.closest("#btnCloseModal") || e.target.closest("#btnCloseModalMobile");
+    if (closeBtn) {
+        const modal = document.getElementById("modalCetakJurnal");
+        if (modal) {
+            modal.classList.add("hidden");
+            modal.style.display = "none";
+        }
+    }
+
+    const docxBtn = e.target.closest("#btnDownloadDocx");
+    if (docxBtn) {
+        e.preventDefault();
+        const selectEl = document.getElementById("selectJurnalSiswa");
+        let selectedNisn = selectEl ? selectEl.value : "";
+        if (!selectedNisn || selectedNisn === "all") {
+            if (typeof daftarSiswaCache !== "undefined" && daftarSiswaCache.length > 0) {
+                selectedNisn = daftarSiswaCache[0].nisn;
+            }
+        }
+        generateDocxExport(selectedNisn, docxBtn);
+    }
+
+    const printBtn = e.target.closest("#btnDoPrint");
+    if (printBtn) {
+        const printArea = document.getElementById("printAreaContainer");
+        if (!printArea) {
+            window.print();
+            return;
+        }
+
+        let printDiv = document.getElementById("tempPrintWrapper");
+        if (!printDiv) {
+            printDiv = document.createElement("div");
+            printDiv.id = "tempPrintWrapper";
+            document.body.appendChild(printDiv);
+        }
+        printDiv.innerHTML = printArea.innerHTML;
+        window.print();
+    }
+});
+
+async function generateJurnalPrintView(nisn, fetchedJurnalData = null) {
+    const student = (typeof daftarSiswaCache !== "undefined" && daftarSiswaCache.find(s => String(s.nisn) === String(nisn))) || { nisn: nisn, nama: nisn, lokasiPKL: "DUDI", jurusan: "Teknik Kendaraan Ringan" };
+    const namaGuru = localStorage.getItem("nama_guru") || "Guru Pembimbing";
+    const konsentrasiKeahlian = student.jurusan || student.kelas || "Teknik Kendaraan Ringan";
+    
+    let studentJurnal = [];
+    if (Array.isArray(fetchedJurnalData) && fetchedJurnalData.length > 0) {
+        studentJurnal = fetchedJurnalData;
+    } else {
+        try {
+            const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getJurnalGuru&namaGuru=${encodeURIComponent(namaGuru)}&bulan=all`);
+            const result = await res.json();
+            if (result.status === "success" && Array.isArray(result.data)) {
+                studentJurnal = result.data.filter(j => String(j.nisn) === String(nisn));
+            }
+        } catch(e) {
+            console.error("Fetch live jurnal error", e);
+        }
+    }
+
+    if (studentJurnal.length === 0 && typeof jurnalGuruCache !== "undefined") {
+        studentJurnal = jurnalGuruCache.filter(j => String(j.nisn) === String(nisn));
+    }
+
+    let pageItems = [];
+    if (studentJurnal.length > 0) {
+        studentJurnal.forEach((entry) => {
+            const deskripsi = entry.keterangan || entry.agenda || entry.jurnal || entry.kegiatan || entry.alasan || "-";
+            let photoUrls = [];
+            if (Array.isArray(entry.photoUrls) && entry.photoUrls.length > 0) {
+                photoUrls = entry.photoUrls;
+            } else if (entry.foto) {
+                photoUrls = [entry.foto];
+            }
+
+            if (photoUrls.length > 0) {
+                photoUrls.forEach((url) => {
+                    pageItems.push({ photoUrl: url, judulKegiatan: deskripsi, rawEntry: entry });
+                });
+            } else {
+                pageItems.push({ photoUrl: null, judulKegiatan: deskripsi, rawEntry: entry });
+            }
+        });
+    }
+
+    if (pageItems.length === 0) {
+        pageItems.push({ photoUrl: null, judulKegiatan: "MEMBESIHKAN LINER", rawEntry: {} });
+    }
+
+    const totalPages = pageItems.length;
+    let pagesHtml = "";
+
+    for (let p = 0; p < totalPages; p++) {
+        const item = pageItems[p];
+        let rawStr = item.judulKegiatan || "";
+        let regexPolaFoto = /(?:foto\s*\d*[\s:\.\-]*)/gi;
+        let parts = rawStr.split(regexPolaFoto).map(s => s.trim()).filter(Boolean);
+        if (parts.length === 0) {
+            let cleaned = rawStr.replace(regexPolaFoto, "").trim();
+            parts = cleaned ? [cleaned] : ["MEMBESIHKAN LINER"];
+        }
+
+        let judulFormatted = parts.map((j, i) => `<div class="font-bold text-slate-900 mb-1">${i + 1}. ${j.toUpperCase()}</div>`).join("");
+
+        let fileId = null;
+        if (item.photoUrl) {
+            if (item.photoUrl.includes('/d/')) {
+                const match = item.photoUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                if (match && match[1]) fileId = match[1];
+            } else if (item.photoUrl.includes('id=')) {
+                const match = item.photoUrl.match(/id=([a-zA-Z0-9_-]+)/);
+                if (match && match[1]) fileId = match[1];
+            }
+        }
+
+        let thumbUrl = fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w800` : item.photoUrl;
+
+        let photoSrcHtml = thumbUrl 
+            ? `<div class="w-full h-[85mm] max-h-[85mm] flex items-center justify-center bg-slate-50 border border-slate-200 rounded-md p-1 overflow-hidden">
+                 <img src="${thumbUrl}" class="w-full h-full object-contain mx-auto block" alt="Dokumentasi Kegiatan" referrerpolicy="no-referrer" loading="lazy" />
+               </div>`
+            : `<div class="w-full h-[85mm] border border-dashed border-slate-300 flex items-center justify-center text-slate-400 font-medium text-sm rounded-md">[ Foto Dokumentasi ]</div>`;
+
+        let dottedLines = Array(10).fill('<div class="border-b border-dotted border-slate-400 h-5 w-full"></div>').join('');
+
+        pagesHtml += `
+            <div class="a4-page bg-white p-[15mm] text-slate-900 font-sans shadow-lg mx-auto mb-8 border border-slate-200 relative box-border flex flex-col justify-between h-[297mm] max-h-[297mm] overflow-hidden">
+                <div>
+                    <div class="text-center mb-6 pt-0">
+                        <h2 class="text-[18px] font-bold tracking-normal uppercase text-slate-900 border-b-2 border-slate-900 pb-1 inline-block">
+                            LEMBAR KEGIATAN HARIAN PKL
+                        </h2>
+                    </div>
+
+                    <div class="text-xs grid grid-cols-2 gap-x-6 gap-y-1.5 mb-6 text-slate-900 font-medium leading-relaxed">
+                        <div class="space-y-1">
+                            <div class="flex"><span class="w-40 shrink-0 font-bold">Nama Siswa</span><span class="mr-2">:</span><span class="font-bold uppercase text-slate-900">${student.nama || "RADITYA EKA JUNAEDI"}</span></div>
+                            <div class="flex"><span class="w-40 shrink-0 font-bold">Konsentrasi Keahlian</span><span class="mr-2">:</span><span class="uppercase text-slate-900">${konsentrasiKeahlian}</span></div>
+                        </div>
+                        <div class="space-y-1">
+                            <div class="flex"><span class="w-40 shrink-0 font-bold">Tempat PKL / DUDI</span><span class="mr-2">:</span><span class="uppercase text-slate-900">${student.lokasiPKL || student.dudi || "AA DIESEL"}</span></div>
+                            <div class="flex"><span class="w-40 shrink-0 font-bold">Guru Pembimbing</span><span class="mr-2">:</span><span class="uppercase text-slate-900">${namaGuru}</span></div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div class="mb-3">
+                            <div class="text-xs font-bold text-slate-900 mb-1">Judul Kegiatan/Pekerjaan :</div>
+                            <div class="text-xs text-slate-900 uppercase tracking-wide leading-snug mb-2">
+                                ${judulFormatted}
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="text-xs font-bold text-slate-900 mb-1.5">Dokumentasi Kegiatan/Pekerjaan :</div>
+                            ${photoSrcHtml}
+                        </div>
+
+                        <div class="mb-2 w-full">
+                            <div class="text-xs font-bold text-slate-900 mb-1">Uraian Kegiatan/Pekerjaan :</div>
+                            <div class="w-full space-y-0.5 pt-0.5">
+                                ${dottedLines}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t border-slate-200 text-[10px] text-slate-400 flex justify-between items-center no-print-footer">
+                    <span>Absensi PSG - SMKN 1 Gombong</span>
+                    <span>Halaman ${p + 1} dari ${totalPages}</span>
+                </div>
+            </div>
+        `;
+    }
+
+    const printAreaContainer = document.getElementById("printAreaContainer");
+    if (printAreaContainer) printAreaContainer.innerHTML = pagesHtml;
+}
+
+

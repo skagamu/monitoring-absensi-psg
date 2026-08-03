@@ -70,6 +70,8 @@
             .overflow-x-auto { overflow: visible !important; }
         }
     </style>
+    <script src="https://unpkg.com/docx@7.3.0/build/index.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 </head>
 <body class="text-slate-800 min-h-screen flex items-center justify-center relative overflow-hidden antialiased">
 
@@ -244,10 +246,14 @@
 
                     <!-- TAB: JURNAL -->
                     <div id="tab-jurnal" class="tab-content animate-fadeIn space-y-4 hidden flex-col h-full">
-                        <div class="flex gap-2 shrink-0 no-print">
-                            <select id="selectJurnalSiswa" class="flex-1 bg-white border border-slate-200 text-slate-700 font-medium text-sm rounded-xl px-3 py-2.5 outline-none focus:border-primary shadow-sm cursor-pointer">
+                        <div class="flex flex-col sm:flex-row gap-2.5 shrink-0 no-print w-full">
+                            <select id="selectJurnalSiswa" class="flex-1 bg-white border border-slate-200 text-slate-700 font-medium text-sm rounded-xl px-3 py-2.5 outline-none focus:border-primary shadow-sm cursor-pointer w-full">
                                 <option value="all">Semua Siswa</option>
                             </select>
+                            <button id="btnCetakJurnal" class="bg-emerald-600 text-white px-4 py-2.5 rounded-xl font-semibold text-sm shadow-sm hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto">
+                                <i class="ph ph-printer text-lg"></i>
+                                <span>Cetak Jurnal</span>
+                            </button>
                         </div>
                         <div id="jurnalGuruContainer" class="flex-1 space-y-3 pb-4">
                             <div class="text-center text-slate-400 text-sm py-6 font-medium">Memuat data jurnal...</div>
@@ -264,7 +270,7 @@
         <span id="toastMsg">Notifikasi</span>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=1785717088740"></script>
     <script>
         // Tanggal di header
         const now = new Date();
@@ -293,5 +299,41 @@
             setTimeout(() => { toast.classList.remove('!bottom-8'); }, 3000);
         }
     </script>
+
+    <!-- Modal Pratinjau Cetak Jurnal A4 -->
+    <div id="modalCetakJurnal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] hidden items-center justify-center p-4 overflow-y-auto">
+        <div class="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden no-print-modal">
+            <!-- Header Modal -->
+            <div class="px-4 py-3 sm:px-6 sm:py-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50 shrink-0">
+                <div class="flex items-center justify-between w-full sm:w-auto">
+                    <div class="flex items-center gap-2">
+                        <i class="ph ph-file-text text-primary text-xl"></i>
+                        <h3 class="font-bold text-slate-800 text-sm sm:text-base">Pratinjau Jurnal</h3>
+                    </div>
+                    <button id="btnCloseModalMobile" class="sm:hidden text-slate-400 hover:text-slate-600 p-1 text-xl">
+                        <i class="ph ph-x"></i>
+                    </button>
+                </div>
+                <div class="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+                    <button id="btnDownloadDocx" class="flex-1 sm:flex-none bg-blue-600 text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                        <i class="ph ph-file-doc text-base"></i> Download Word
+                    </button>
+                    <button id="btnDoPrint" class="flex-1 sm:flex-none bg-primary text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-blue-900 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                        <i class="ph ph-printer text-base"></i> Cetak / Simpan PDF
+                    </button>
+                    <button id="btnCloseModal" class="hidden sm:block text-slate-400 hover:text-slate-600 p-2 rounded-xl text-xl">
+                        <i class="ph ph-x"></i>
+                    </button>
+                </div>
+            </div>
+            <!-- Body Pratinjau Lembar A4 -->
+            <div class="p-4 md:p-8 overflow-y-auto flex-1 bg-slate-500/30 flex justify-center items-start">
+                <div class="w-full max-w-[210mm] flex justify-center overflow-x-auto py-4">
+                    <div id="printAreaContainer" class="bg-transparent text-slate-900 font-sans text-xs w-[210mm] shrink-0 origin-top transform scale-[0.85] sm:scale-100 transition-transform space-y-8">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
