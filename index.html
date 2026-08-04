@@ -233,11 +233,15 @@
 
                     <!-- TAB: DETAIL SISWA -->
                     <div id="tab-detail" class="tab-content animate-fadeIn space-y-4 hidden flex-col h-full">
-                        <div class="flex gap-2 shrink-0 no-print">
-                            <select id="selectDetailSiswa" class="flex-1 bg-white border border-slate-200 text-slate-700 font-medium text-sm rounded-xl px-3 py-2.5 outline-none focus:border-primary shadow-sm cursor-pointer">
+                        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0 no-print w-full">
+                            <select id="selectDetailSiswa" class="flex-1 bg-white border border-slate-200 text-slate-700 font-medium text-sm rounded-xl px-3 py-2.5 outline-none focus:border-primary shadow-sm cursor-pointer min-w-0">
                                 <option value="">-- Pilih Siswa --</option>
                             </select>
-                            <input type="month" id="detailMonthSelector" class="w-36 bg-white border border-slate-200 text-slate-700 font-medium text-sm rounded-xl px-2 outline-none focus:border-primary shadow-sm">
+                            <input type="month" id="detailMonthSelector" class="w-full sm:w-36 bg-white border border-slate-200 text-slate-700 font-medium text-sm rounded-xl px-3 py-2.5 outline-none focus:border-primary shadow-sm shrink-0">
+                            <button id="btnCetakAgendaHarian" class="bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-semibold text-xs sm:text-sm shadow-sm hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shrink-0 w-full sm:w-auto">
+                                <i class="ph ph-notebook text-lg"></i>
+                                <span>Cetak Agenda Harian</span>
+                            </button>
                         </div>
                         <!-- PSG Info for selected student -->
                         <div id="detailPsgInfo" class="hidden"></div>
@@ -270,7 +274,7 @@
         <span id="toastMsg">Notifikasi</span>
     </div>
 
-    <script src="app.js?v=1785718498711"></script>
+    <script src="app.js?v=1785809071479"></script>
     <script>
         // Tanggal di header
         const now = new Date();
@@ -335,5 +339,42 @@
             </div>
         </div>
     </div>
+
+    <!-- Modal Pratinjau Cetak Agenda Harian PKL (5 Kolom) -->
+    <div id="modalCetakAgendaHarian" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[150] hidden items-center justify-center p-4 overflow-y-auto">
+        <div class="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden no-print-modal">
+            <!-- Header Modal -->
+            <div class="px-4 py-3 sm:px-6 sm:py-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50 shrink-0">
+                <div class="flex items-center justify-between w-full sm:w-auto">
+                    <div class="flex items-center gap-2">
+                        <i class="ph ph-notebook text-indigo-600 text-xl"></i>
+                        <h3 class="font-bold text-slate-800 text-sm sm:text-base">Pratinjau Agenda Harian PKL</h3>
+                    </div>
+                    <button id="btnCloseModalAgendaMobile" class="sm:hidden text-slate-400 hover:text-slate-600 p-1 text-xl">
+                        <i class="ph ph-x"></i>
+                    </button>
+                </div>
+                <div class="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+                    <button id="btnDownloadDocxAgenda" class="flex-1 sm:flex-none bg-indigo-600 text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                        <i class="ph ph-file-doc text-base"></i> Download Word
+                    </button>
+                    <button id="btnDoPrintAgenda" class="flex-1 sm:flex-none bg-primary text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-blue-900 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                        <i class="ph ph-printer text-base"></i> Cetak / Simpan PDF
+                    </button>
+                    <button id="btnCloseModalAgenda" class="hidden sm:block text-slate-400 hover:text-slate-600 p-2 rounded-xl text-xl">
+                        <i class="ph ph-x"></i>
+                    </button>
+                </div>
+            </div>
+            <!-- Body Pratinjau Lembar A4 -->
+            <div class="p-4 md:p-8 overflow-y-auto flex-1 bg-slate-500/30 flex justify-center items-start">
+                <div class="w-full max-w-[210mm] flex justify-center overflow-x-auto py-4">
+                    <div id="printAreaAgendaContainer" class="bg-transparent text-slate-900 font-sans text-xs w-[210mm] shrink-0 origin-top transform scale-[0.85] sm:scale-100 transition-transform space-y-8">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>

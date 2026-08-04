@@ -716,6 +716,7 @@ async function fetchJurnalGuru(namaGuru, bulan = 'all') {
         const result = await res.json();
         if (result.status === 'success') {
             jurnalGuruCache = result.data || [];
+            if (result.pengaturan) window.pengaturanCache = result.pengaturan;
             if (currentTab === 'jurnal') renderJurnalGuru();
         }
     } catch (e) {
@@ -966,12 +967,15 @@ async function generateJurnalPrintView(nisn, fetchedJurnalData = null) {
     } else {
         try {
             const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getJurnalGuru&namaGuru=${encodeURIComponent(namaGuru)}&bulan=all`);
-            const result = await res.json();
-            if (result.status === "success" && Array.isArray(result.data)) {
-                studentJurnal = result.data.filter(j => String(j.nisn) === String(nisn));
+            const text = await res.text();
+            if (text.startsWith('{') || text.startsWith('[')) {
+                const result = JSON.parse(text);
+                if (result.status === "success" && Array.isArray(result.data)) {
+                    studentJurnal = result.data.filter(j => String(j.nisn) === String(nisn));
+                }
             }
         } catch(e) {
-            console.error("Fetch live jurnal error", e);
+            console.warn("Fetch live jurnal error, fallback ke cache", e);
         }
     }
 
@@ -1350,6 +1354,487 @@ async function generateDocxExport(nisn, btnElement) {
     } catch (err) {
         console.error("Gagal export Word (.docx)", err);
         alert("Terjadi masalah saat membuat file Word: " + err.message);
+    } finally {
+        btnElement.disabled = false;
+        btnElement.innerHTML = originalText;
+    }
+}
+
+
+// ===== FITUR CETAK AGENDA HARIAN PKL (TAB DETAIL SISWA) =====
+document.addEventListener("click", async (e) => {
+    const btn = e.target.closest("#btnCetakAgendaHarian");
+    if (btn) {
+        const selectEl = document.getElementById("selectDetailSiswa");
+        let selectedNisn = selectEl ? selectEl.value : "";
+        if (!selectedNisn) {
+            if (typeof daftarSiswaCache !== "undefined" && daftarSiswaCache.length > 0) {
+                selectedNisn = daftarSiswaCache[0].nisn;
+            } else {
+                selectedNisn = "10244";
+            }
+        }
+
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<i class="ph ph-spinner animate-spin text-lg"></i> Memuat Agenda...`;
+
+        try {
+            const namaGuru = localStorage.getItem('nama_guru') || '';
+            let absensiData = [];
+            let jurnalData = [];
+
+            try {
+                const resRekap = await fetch(`${GOOGLE_SCRIPT_URL}?action=getRekapGuru&namaGuru=${encodeURIComponent(namaGuru)}&bulan=all`);
+                const txtRekap = await resRekap.text();
+                if (txtRekap.startsWith("{") || txtRekap.startsWith("[")) {
+                    const jsonRekap = JSON.parse(txtRekap);
+                    if (jsonRekap.status === "success" && Array.isArray(jsonRekap.data)) {
+                        absensiData = jsonRekap.data.filter(a => String(a.nisn) === String(selectedNisn));
+                    }
+                }
+            } catch (e1) { console.warn("Fetch rekap guru error:", e1); }
+
+            try {
+                const resJurnal = await fetch(`${GOOGLE_SCRIPT_URL}?action=getJurnalGuru&namaGuru=${encodeURIComponent(namaGuru)}&bulan=all`);
+                const txtJurnal = await resJurnal.text();
+                if (txtJurnal.startsWith("{") || txtJurnal.startsWith("[")) {
+                    const jsonJurnal = JSON.parse(txtJurnal);
+                    if (jsonJurnal.status === "success" && Array.isArray(jsonJurnal.data)) {
+                        jurnalData = jsonJurnal.data.filter(j => String(j.nisn) === String(selectedNisn));
+                    }
+                }
+            } catch (e2) { console.warn("Fetch jurnal guru error:", e2); }
+
+            await generateAgendaHarianPrintView(selectedNisn, { absensi: absensiData, jurnal: jurnalData });
+        } catch (err) {
+            console.error("Gagal mengambil data agenda harian", err);
+            await generateAgendaHarianPrintView(selectedNisn, []);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+
+        const modal = document.getElementById("modalCetakAgendaHarian");
+        if (modal) {
+            modal.classList.remove("hidden");
+            modal.style.display = "flex";
+        } else {
+            console.error("Modal element modalCetakAgendaHarian not found in DOM");
+        }
+    }
+
+    const closeBtn = e.target.closest("#btnCloseModalAgenda") || e.target.closest("#btnCloseModalAgendaMobile");
+    if (closeBtn) {
+        const modal = document.getElementById("modalCetakAgendaHarian");
+        if (modal) {
+            modal.classList.add("hidden");
+            modal.style.display = "none";
+        }
+    }
+
+    const docxAgendaBtn = e.target.closest("#btnDownloadDocxAgenda");
+    if (docxAgendaBtn) {
+        e.preventDefault();
+        const selectEl = document.getElementById("selectDetailSiswa");
+        let selectedNisn = selectEl ? selectEl.value : "";
+        generateAgendaDocxExport(selectedNisn, docxAgendaBtn);
+    }
+
+    const printAgendaBtn = e.target.closest("#btnDoPrintAgenda");
+    if (printAgendaBtn) {
+        const printArea = document.getElementById("printAreaAgendaContainer");
+        if (!printArea) {
+            window.print();
+            return;
+        }
+        let printDiv = document.getElementById("tempPrintWrapper");
+        if (!printDiv) {
+            printDiv = document.createElement("div");
+            printDiv.id = "tempPrintWrapper";
+            document.body.appendChild(printDiv);
+        }
+        printDiv.innerHTML = printArea.innerHTML;
+        window.print();
+    }
+});
+
+async function generateAgendaHarianPrintView(nisn, fetchedData = null) {
+    const student = (typeof daftarSiswaCache !== "undefined" && daftarSiswaCache.find(s => String(s.nisn) === String(nisn))) || { nisn: nisn, nama: "PANDU SANGKATAKA", lokasiPKL: "BENGKEL BRINTIK'S", jurusan: "TEKNIK KENDARAAN RINGAN" };
+
+    let studentAbsensi = [];
+    let studentJurnal = [];
+
+    if (fetchedData && typeof fetchedData === "object" && !Array.isArray(fetchedData)) {
+        studentAbsensi = fetchedData.absensi || [];
+        studentJurnal = fetchedData.jurnal || [];
+    } else if (Array.isArray(fetchedData)) {
+        studentAbsensi = fetchedData;
+    }
+
+    if (studentAbsensi.length === 0 && typeof rekapGuruCache !== "undefined") studentAbsensi = rekapGuruCache.filter(a => String(a.nisn) === String(nisn));
+    if (studentJurnal.length === 0 && typeof jurnalGuruCache !== "undefined") studentJurnal = jurnalGuruCache.filter(j => String(j.nisn) === String(nisn));
+
+    // Map pencocokan tanggal serbaguna (mendukung DD/MM/YYYY dan YYYY-MM-DD)
+    let dateMap = {};
+    const registerEntry = (tglStr, entry, type) => {
+        if (!tglStr) return;
+        let s = String(tglStr).trim();
+        if (!dateMap[s]) dateMap[s] = {};
+        dateMap[s][type] = entry;
+
+        if (s.includes('/')) {
+            let p = s.split('/');
+            if (p.length === 3) {
+                let alt1 = `${parseInt(p[0])}/${parseInt(p[1])}/${p[2]}`;
+                let alt2 = `${p[0].padStart(2,'0')}/${p[1].padStart(2,'0')}/${p[2]}`;
+                if (!dateMap[alt1]) dateMap[alt1] = {};
+                dateMap[alt1][type] = entry;
+                if (!dateMap[alt2]) dateMap[alt2] = {};
+                dateMap[alt2][type] = entry;
+            }
+        }
+    };
+
+    studentAbsensi.forEach(a => registerEntry(a.tanggal || a.tgl, a, 'absensi'));
+    studentJurnal.forEach(j => registerEntry(j.tanggal || j.weekStart, j, 'jurnal'));
+
+    let tglMulai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglMulai) || (typeof configCache !== 'undefined' && configCache.tglMulai) || '09/06/2026';
+    let tglSelesai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglSelesai) || (typeof configCache !== 'undefined' && configCache.tglSelesai) || '26/10/2026';
+
+    const parseTglStr = (str) => {
+        if (!str) return null;
+        if (str.includes('/')) {
+            const p = str.split('/');
+            if (p.length === 3) return new Date(`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`);
+        }
+        return new Date(str);
+    };
+
+    let startDate = parseTglStr(tglMulai) || new Date('2026-06-09');
+    let endDate = parseTglStr(tglSelesai) || new Date('2026-10-26');
+
+    const daysName = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    let agendaRows = [];
+    let cur = new Date(startDate);
+
+    while (cur <= endDate) {
+        const dd = String(cur.getDate()).padStart(2, '0');
+        const mm = String(cur.getMonth() + 1).padStart(2, '0');
+        const yyyy = cur.getFullYear();
+        const formattedTgl = `${dd}/${mm}/${yyyy}`;
+        const dayIdx = cur.getDay();
+        const hariStr = daysName[dayIdx];
+        const hariTanggalCombined = `${hariStr}, ${formattedTgl}`;
+
+        const record = dateMap[formattedTgl] || dateMap[`${parseInt(dd)}/${parseInt(mm)}/${yyyy}`];
+        const matchAbsensi = record ? record.absensi : null;
+        const matchJurnal = record ? record.jurnal : null;
+
+        if (matchAbsensi || matchJurnal) {
+            let ket = (matchAbsensi && matchAbsensi.status) ? matchAbsensi.status : "Hadir";
+            let uraianRaw = (matchAbsensi && (matchAbsensi.agenda || matchAbsensi.agendaHarian || matchAbsensi.kegiatan || matchAbsensi.alasan || matchAbsensi.keterangan)) 
+                         || (matchJurnal && (matchJurnal.keterangan || matchJurnal.agenda || matchJurnal.jurnal))
+                         || (matchAbsensi && matchAbsensi.status === "Sakit" ? "Sakit" : (matchAbsensi && matchAbsensi.status === "Izin" ? "Izin" : "-"));
+
+            let uraianStr = String(uraianRaw || "-").trim();
+            if (/^foto\s*\d*[\s:.\-]*$/i.test(uraianStr)) {
+                uraianStr = "-";
+            } else {
+                uraianStr = uraianStr.replace(/^foto\s*\d*[\s:.\-]*\s*/gi, "").trim();
+            }
+
+            agendaRows.push({
+                hariTanggal: hariTanggalCombined,
+                keterangan: ket,
+                uraian: uraianStr || "-"
+            });
+        } else {
+            const isMinggu = (dayIdx === 0);
+            agendaRows.push({
+                hariTanggal: hariTanggalCombined,
+                keterangan: isMinggu ? "Libur" : "Hadir",
+                uraian: isMinggu ? "Libur" : "-"
+            });
+        }
+        cur.setDate(cur.getDate() + 1);
+    }
+
+    const itemsPerPage = 23;
+    const totalPages = Math.ceil(agendaRows.length / itemsPerPage) || 1;
+    let pagesHtml = "";
+
+    for (let p = 0; p < totalPages; p++) {
+        const pageItems = agendaRows.slice(p * itemsPerPage, (p + 1) * itemsPerPage);
+        let tableRowsHtml = "";
+
+        pageItems.forEach((row, idx) => {
+            const rowNo = (p * itemsPerPage) + idx + 1;
+            tableRowsHtml += `
+                <tr class="border-b border-slate-900 text-center font-medium">
+                    <td class="border-r border-slate-900 px-2 py-1.5">${rowNo}</td>
+                    <td class="border-r border-slate-900 px-1.5 py-1.5 whitespace-nowrap text-left text-[11px] font-semibold">${row.hariTanggal}</td>
+                    <td class="border-r border-slate-900 px-2 py-1.5 font-bold">${row.keterangan}</td>
+                    <td class="px-3 py-1.5 text-left uppercase">${row.uraian}</td>
+                </tr>
+            `;
+        });
+
+        pagesHtml += `
+            <div class="a4-page bg-white p-[15mm] text-slate-900 font-sans shadow-lg mx-auto mb-8 border border-slate-200 relative box-border flex flex-col justify-between h-[297mm] max-h-[297mm] overflow-hidden">
+                <div>
+                    <div class="text-center mb-6 pt-0">
+                        <h2 class="text-[18px] font-bold tracking-normal uppercase text-slate-900 border-b-2 border-slate-900 pb-1 inline-block">
+                            AGENDA HARIAN PKL
+                        </h2>
+                    </div>
+
+                    <div class="text-xs grid grid-cols-2 gap-x-6 gap-y-1.5 mb-6 text-slate-900 font-medium leading-relaxed">
+                        <div class="space-y-1">
+                            <div class="flex"><span class="w-40 shrink-0 font-bold">Nama Siswa</span><span class="mr-2">:</span><span class="font-bold uppercase text-slate-900">${student.nama || "RADITYA EKA JUNAEDI"}</span></div>
+                            <div class="flex"><span class="w-40 shrink-0 font-bold">Konsentrasi Keahlian</span><span class="mr-2">:</span><span class="uppercase text-slate-900">${student.jurusan || student.kelas || "TEKNIK KENDARAAN RINGAN"}</span></div>
+                        </div>
+                        <div class="space-y-1">
+                            <div class="flex"><span class="w-40 shrink-0 font-bold">Tempat PKL / DUDI</span><span class="mr-2">:</span><span class="uppercase text-slate-900">${student.lokasiPKL || student.dudi || "AA DIESEL"}</span></div>
+                            <div class="flex"><span class="w-40 shrink-0 font-bold">Guru Pembimbing</span><span class="mr-2">:</span><span class="uppercase text-slate-900">${localStorage.getItem("nama_guru") || "Guru Pembimbing"}</span></div>
+                        </div>
+                    </div>
+
+                    <div class="w-full border-2 border-slate-900 rounded-sm overflow-hidden mb-4">
+                        <table class="w-full text-xs text-slate-900 border-collapse">
+                            <thead>
+                                <tr class="bg-slate-100 border-b-2 border-slate-900 font-bold text-center">
+                                    <th class="border-r border-slate-900 px-2 py-2 w-10">NO</th>
+                                    <th class="border-r border-slate-900 px-2 py-2 w-32 text-center">HARI, TANGGAL</th>
+                                    <th class="border-r border-slate-900 px-2 py-2 w-28">KETERANGAN</th>
+                                    <th class="px-3 py-2">URAIAN SINGKAT PEKERJAAN YANG DILAKUKAN</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${tableRowsHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="pt-2 border-t border-slate-200 text-[10px] text-slate-500 flex justify-between items-center no-print-footer">
+                    <span>Ket : diisi siswa dari agenda harian online</span>
+                    <span>${p + 1}</span>
+                </div>
+            </div>
+        `;
+    }
+
+    const printAreaContainer = document.getElementById("printAreaAgendaContainer");
+    if (printAreaContainer) {
+        printAreaContainer.innerHTML = pagesHtml;
+    } else {
+        console.error("Target container printAreaAgendaContainer not found in DOM");
+    }
+}
+async function generateAgendaDocxExport(nisn, btnElement) {
+    const docxLib = window.docx || (typeof docx !== "undefined" ? docx : null);
+    const saveAsFn = window.saveAs || (typeof saveAs !== "undefined" ? saveAs : null);
+
+    if (!docxLib) {
+        alert("Library docx belum siap di browser. Pastikan koneksi terhubung dan refresh halaman.");
+        return;
+    }
+
+    const student = (typeof daftarSiswaCache !== "undefined" && daftarSiswaCache.find(s => String(s.nisn) === String(nisn))) || { nisn: nisn, nama: "PANDU SANGKATAKA", lokasiPKL: "BENGKEL BRINTIK'S", jurusan: "TEKNIK KENDARAAN RINGAN" };
+    const originalText = btnElement.innerHTML;
+    btnElement.disabled = true;
+    btnElement.innerHTML = `<i class="ph ph-spinner animate-spin text-base"></i> Menyusun Word...`;
+
+    try {
+        let studentAbsensi = [];
+        try {
+            const namaGuru = localStorage.getItem('nama_guru') || '';
+            const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getRekapGuru&namaGuru=${encodeURIComponent(namaGuru)}&bulan=all`);
+            const text = await res.text();
+            if (text.startsWith('{') || text.startsWith('[')) {
+                const result = JSON.parse(text);
+                if (result.status === 'success' && Array.isArray(result.data)) {
+                    studentAbsensi = result.data.filter(a => String(a.nisn) === String(nisn));
+                }
+            }
+        } catch (err) {
+            console.warn("Gagal tarik live data di Word Agenda export, fallback cache", err);
+        }
+
+        let absensiMap = {};
+        studentAbsensi.forEach(entry => {
+            let tgl = entry.tanggal || entry.tgl;
+            if (tgl) {
+                let cleanTgl = tgl.trim();
+                absensiMap[cleanTgl] = entry;
+                // Simpan juga versi tanpa pad zero (misal 9/6/2026 dan 09/06/2026)
+                if (cleanTgl.includes('/')) {
+                    let parts = cleanTgl.split('/');
+                    if (parts.length === 3) {
+                        let alt1 = `${parseInt(parts[0])}/${parseInt(parts[1])}/${parts[2]}`;
+                        let alt2 = `${parts[0].padStart(2,'0')}/${parts[1].padStart(2,'0')}/${parts[2]}`;
+                        absensiMap[alt1] = entry;
+                        absensiMap[alt2] = entry;
+                    }
+                }
+            }
+        });
+
+        let tglMulai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglMulai) || (typeof configCache !== 'undefined' && configCache.tglMulai) || '09/06/2026';
+        let tglSelesai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglSelesai) || (typeof configCache !== 'undefined' && configCache.tglSelesai) || '26/10/2026';
+
+        const parseTglStr = (str) => {
+            if (!str) return null;
+            if (str.includes('/')) {
+                const p = str.split('/');
+                if (p.length === 3) return new Date(`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`);
+            }
+            return new Date(str);
+        };
+
+        let startDate = parseTglStr(tglMulai) || new Date('2026-06-09');
+        let endDate = parseTglStr(tglSelesai) || new Date('2026-10-26');
+
+        const daysName = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+        let agendaRows = [];
+        let cur = new Date(startDate);
+
+        while (cur <= endDate) {
+            const dd = String(cur.getDate()).padStart(2, '0');
+            const mm = String(cur.getMonth() + 1).padStart(2, '0');
+            const yyyy = cur.getFullYear();
+            const formattedTgl = `${dd}/${mm}/${yyyy}`;
+            const dayIdx = cur.getDay();
+            const hariStr = daysName[dayIdx];
+            const hariTanggalCombined = `${hariStr}, ${formattedTgl}`;
+
+            const record = absensiMap[formattedTgl] || absensiMap[`${parseInt(dd)}/${parseInt(mm)}/${yyyy}`];
+            if (record) {
+                let ket = record.status || "Hadir";
+                let uraianRaw = record.agenda || record.agendaHarian || record.kegiatan || record.alasan || record.keterangan || "-";
+                let uraianStr = String(uraianRaw || "-").trim();
+                if (/^foto\s*\d*[\s:.\-]*$/i.test(uraianStr)) {
+                    uraianStr = "-";
+                } else {
+                    uraianStr = uraianStr.replace(/^foto\s*\d*[\s:.\-]*\s*/gi, "").trim();
+                }
+
+                agendaRows.push({
+                    hariTanggal: hariTanggalCombined,
+                    keterangan: ket,
+                    uraian: uraianStr || "-"
+                });
+            } else {
+                const isMinggu = (dayIdx === 0);
+                agendaRows.push({
+                    hariTanggal: hariTanggalCombined,
+                    keterangan: isMinggu ? "Libur" : "Hadir",
+                    uraian: isMinggu ? "Libur" : "-"
+                });
+            }
+            cur.setDate(cur.getDate() + 1);
+        }
+
+        const { Document, Packer, Paragraph, TextRun, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle } = docxLib;
+
+        const tableHeader = new TableRow({
+            tableHeader: true,
+            children: [
+                new TableCell({ width: { size: 8, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "NO", bold: true, size: 20 })], alignment: AlignmentType.CENTER })] }),
+                new TableCell({ width: { size: 20, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "HARI, TANGGAL", bold: true, size: 20 })], alignment: AlignmentType.CENTER })] }),
+                new TableCell({ width: { size: 14, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "KETERANGAN", bold: true, size: 20 })], alignment: AlignmentType.CENTER })] }),
+                new TableCell({ width: { size: 60, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "URAIAN SINGKAT PEKERJAAN YANG DILAKUKAN", bold: true, size: 20 })], alignment: AlignmentType.CENTER })] })
+            ]
+        });
+
+        const tableBodyRows = agendaRows.map((row, idx) => 
+            new TableRow({
+                children: [
+                    new TableCell({ width: { size: 8, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: `${idx + 1}`, size: 20 })], alignment: AlignmentType.CENTER })] }),
+                    new TableCell({ width: { size: 20, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: row.hariTanggal, bold: true, size: 19 })] })] }),
+                    new TableCell({ width: { size: 14, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: row.keterangan, bold: true, size: 19 })], alignment: AlignmentType.CENTER })] }),
+                    new TableCell({ width: { size: 60, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: row.uraian.toUpperCase(), size: 19 })] })] })
+                ]
+            })
+        );
+
+        const agendaTable = new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: [tableHeader, ...tableBodyRows]
+        });
+
+        const noBorders = {
+            top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+            bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+            left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+            right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+            insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+            insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" }
+        };
+
+        const namaGuruAgenda = localStorage.getItem("nama_guru") || "Guru Pembimbing";
+        const identitasTable = new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            borders: noBorders,
+            rows: [
+                new TableRow({
+                    children: [
+                        new TableCell({ width: { size: 18, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "Nama Siswa", bold: true, size: 20 })] })] }),
+                        new TableCell({ width: { size: 3, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: ":", bold: true, size: 20 })] })] }),
+                        new TableCell({ width: { size: 29, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: (student.nama || "RADITYA EKA JUNAEDI").toUpperCase(), bold: true, size: 20 })] })] }),
+                        new TableCell({ width: { size: 18, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "Tempat PKL / DUDI", bold: true, size: 20 })] })] }),
+                        new TableCell({ width: { size: 3, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: ":", bold: true, size: 20 })] })] }),
+                        new TableCell({ width: { size: 29, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: (student.lokasiPKL || student.dudi || "AA DIESEL").toUpperCase(), size: 20 })] })] })
+                    ]
+                }),
+                new TableRow({
+                    children: [
+                        new TableCell({ width: { size: 18, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "Konsentrasi Keahlian", bold: true, size: 20 })] })] }),
+                        new TableCell({ width: { size: 3, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: ":", bold: true, size: 20 })] })] }),
+                        new TableCell({ width: { size: 29, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: (student.jurusan || student.kelas || "TEKNIK KENDARAAN RINGAN").toUpperCase(), size: 20 })] })] }),
+                        new TableCell({ width: { size: 18, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: "Guru Pembimbing", bold: true, size: 20 })] })] }),
+                        new TableCell({ width: { size: 3, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: ":", bold: true, size: 20 })] })] }),
+                        new TableCell({ width: { size: 29, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: namaGuruAgenda.toUpperCase(), size: 20 })] })] })
+                    ]
+                })
+            ]
+        });
+
+        const doc = new Document({
+            sections: [{
+                properties: { page: { margin: { top: 1134, bottom: 1134, left: 1134, right: 1134 } } },
+                children: [
+                    new Paragraph({
+                        children: [new TextRun({ text: "AGENDA HARIAN PKL", bold: true, size: 36 })],
+                        alignment: AlignmentType.CENTER,
+                        spacing: { after: 300 }
+                    }),
+                    identitasTable,
+                    new Paragraph({ text: "", spacing: { after: 250 } }),
+                    agendaTable,
+                    new Paragraph({ text: "", spacing: { after: 300 } }),
+                    new Paragraph({ children: [new TextRun({ text: "Ket : diisi siswa dari agenda harian online", italic: true, size: 18, color: "666666" })] })
+                ]
+            }]
+        });
+
+        const blob = await Packer.toBlob(doc);
+        const fileName = `Agenda_Harian_PKL_${(student.nama || "Siswa").replace(/\s+/g, "_")}.docx`;
+
+        if (saveAsFn) {
+            saveAsFn(blob, fileName);
+        } else {
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    } catch (err) {
+        console.error("Gagal export Word Agenda Harian (.docx)", err);
+        alert("Terjadi masalah saat membuat file Word Agenda: " + err.message);
     } finally {
         btnElement.disabled = false;
         btnElement.innerHTML = originalText;
