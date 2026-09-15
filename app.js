@@ -1506,13 +1506,15 @@ async function generateAgendaHarianPrintView(nisn, fetchedData = null) {
         if (!str) return null;
         if (str.includes('/')) {
             const p = str.split('/');
-            if (p.length === 3) return new Date(`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`);
+            if (p.length === 3) return new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10));
         }
         return new Date(str);
     };
 
-    let startDate = parseTglStr(tglMulai) || new Date('2026-06-09');
-    let endDate = parseTglStr(tglSelesai) || new Date('2026-10-26');
+    let startDate = parseTglStr(tglMulai) || new Date(2026, 5, 9);
+    if (startDate) startDate.setHours(0, 0, 0, 0);
+    let endDate = parseTglStr(tglSelesai) || new Date(2026, 9, 26);
+    if (endDate) endDate.setHours(23, 59, 59, 999);
 
     const daysName = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
     let agendaRows = [];
@@ -1553,7 +1555,7 @@ async function generateAgendaHarianPrintView(nisn, fetchedData = null) {
             const isMinggu = (dayIdx === 0);
             agendaRows.push({
                 hariTanggal: hariTanggalCombined,
-                keterangan: isMinggu ? "Libur" : "Hadir",
+                keterangan: isMinggu ? "Libur" : "Alpha",
                 uraian: isMinggu ? "Libur" : "-"
             });
         }
@@ -1688,13 +1690,15 @@ async function generateAgendaDocxExport(nisn, btnElement) {
             if (!str) return null;
             if (str.includes('/')) {
                 const p = str.split('/');
-                if (p.length === 3) return new Date(`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`);
+                if (p.length === 3) return new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10));
             }
             return new Date(str);
         };
 
-        let startDate = parseTglStr(tglMulai) || new Date('2026-06-09');
-        let endDate = parseTglStr(tglSelesai) || new Date('2026-10-26');
+        let startDate = parseTglStr(tglMulai) || new Date(2026, 5, 9);
+        if (startDate) startDate.setHours(0, 0, 0, 0);
+        let endDate = parseTglStr(tglSelesai) || new Date(2026, 9, 26);
+        if (endDate) endDate.setHours(23, 59, 59, 999);
 
         const daysName = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
         let agendaRows = [];
@@ -1729,7 +1733,7 @@ async function generateAgendaDocxExport(nisn, btnElement) {
                 const isMinggu = (dayIdx === 0);
                 agendaRows.push({
                     hariTanggal: hariTanggalCombined,
-                    keterangan: isMinggu ? "Libur" : "Hadir",
+                    keterangan: isMinggu ? "Libur" : "Alpha",
                     uraian: isMinggu ? "Libur" : "-"
                 });
             }
