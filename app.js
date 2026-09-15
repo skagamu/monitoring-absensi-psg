@@ -39,11 +39,24 @@ weekSelector.value = getWeekStr(initNow);
 
 function getMondayFromWeek(weekStr) {
     if (!weekStr) return null;
-    const [year, week] = weekStr.split('-W');
+    const parts = weekStr.split('-W');
+    if (parts.length !== 2) return null;
+    const year = +parts[0];
+    const week = +parts[1];
+    if (isNaN(year) || isNaN(week)) return null;
     const d = new Date(year, 0, 1);
     const dayNum = d.getDay() || 7;
     d.setDate(d.getDate() + 4 - dayNum);
     d.setDate(d.getDate() + 7 * (week - 1) - 3);
+    d.setHours(0, 0, 0, 0);
+    return d;
+}
+
+function getCurrentMonday() {
+    const d = new Date();
+    const day = d.getDay() || 7;
+    d.setDate(d.getDate() - day + 1);
+    d.setHours(0, 0, 0, 0);
     return d;
 }
 
@@ -55,10 +68,29 @@ let jurnalGuruCache = [];
 let currentTab = 'dashboard';
 
 // Utilities
-const parseDate = (str) => {
-    const parts = str.split('/');
-    if (parts.length !== 3) return new Date();
-    return new Date(parts[2], parts[1] - 1, parts[0]);
+const parseDate = (val) => {
+    if (!val) return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : new Date(val.getTime());
+    if (typeof val !== 'string') return null;
+    const s = val.trim();
+    if (!s) return null;
+    let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+        const d = new Date(+m[3], +m[2] - 1, +m[1]);
+        return (d.getFullYear() === +m[3] && d.getMonth() === +m[2] - 1 && d.getDate() === +m[1]) ? d : null;
+    }
+    m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s].*)?$/);
+    if (m) {
+        const d = new Date(+m[1], +m[2] - 1, +m[3]);
+        return (d.getFullYear() === +m[1] && d.getMonth() === +m[2] - 1 && d.getDate() === +m[3]) ? d : null;
+    }
+    m = s.match(/^(\d{4})-(\d{1,2})$/);
+    if (m) {
+        const d = new Date(+m[1], +m[2] - 1, 1);
+        return (d.getFullYear() === +m[1] && d.getMonth() === +m[2] - 1) ? d : null;
+    }
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
 };
 const getTodayStr = () => {
     const now = new Date();
@@ -228,65 +260,42 @@ async function fetchData(namaGuru, bulan = null) {
     }
 }
 
-// Global Filter Logic (Gets padded data)
+// Global Filter Logic (Raw filtered items, no dummy padding)
 function getFilteredData(waktu, keyword) {
-    const todayStr = getTodayStr();
     const now = new Date();
     
     let filtered = rawDataCache.filter(item => {
         if (waktu === 'all') return true;
         if (waktu === 'today') {
             const itemDate = parseDate(item.tanggal);
-            return itemDate.getDate() === now.getDate() && itemDate.getMonth() === now.getMonth() && itemDate.getFullYear() === now.getFullYear();
+            return itemDate && itemDate.getDate() === now.getDate() && itemDate.getMonth() === now.getMonth() && itemDate.getFullYear() === now.getFullYear();
         }
         if (waktu === 'week') {
             const itemDate = parseDate(item.tanggal);
-            let monday = getMondayFromWeek(weekSelector.value);
-            if (!monday) {
-                let day = now.getDay();
-                monday = new Date(now.setDate(now.getDate() - day + (day === 0 ? -6 : 1)));
-            }
-            monday.setHours(0,0,0,0);
-            const sunday = new Date(monday);
+            if (!itemDate) return false;
+            let monday = getMondayFromWeek(weekSelector ? weekSelector.value : null) || getCurrentMonday();
+            const sunday = new Date(monday.getTime());
             sunday.setDate(sunday.getDate() + 6);
-            sunday.setHours(23,59,59,999);
+            sunday.setHours(23, 59, 59, 999);
             return itemDate >= monday && itemDate <= sunday;
         }
         if (waktu === 'month') {
             const itemDate = parseDate(item.tanggal);
-            const monthVal = monthSelector.value;
-            if (monthVal) {
-                const [y, m] = monthVal.split('-');
-                return itemDate.getFullYear() == y && (itemDate.getMonth() + 1) == m;
+            if (!itemDate) return false;
+            const monthVal = (monthSelector && monthSelector.value) || currentMonthStr;
+            const parsedMonth = parseDate(monthVal);
+            if (parsedMonth) {
+                return itemDate.getFullYear() === parsedMonth.getFullYear() && itemDate.getMonth() === parsedMonth.getMonth();
             }
             return itemDate.getMonth() === now.getMonth() && itemDate.getFullYear() === now.getFullYear();
         }
         return true;
     });
 
-    // Pad missing students
-    if (daftarSiswaCache.length > 0) {
-        const sudahAbsenNisn = filtered.map(item => item.nisn);
-        const belumAbsen = daftarSiswaCache.filter(s => !sudahAbsenNisn.includes(s.nisn));
-        belumAbsen.forEach(s => {
-            filtered.push({
-                nisn: s.nisn, nama: s.nama,
-                tanggal: waktu === 'today' ? todayStr : '--/--/----',
-                waktu: '--:--', status: 'Belum Absen', foto: null, alasan: ''
-            });
-        });
-    }
-
-    if(keyword) {
+    if (keyword) {
         const kw = keyword.toLowerCase();
-        filtered = filtered.filter(i => i.nama.toLowerCase().includes(kw) || i.nisn.toLowerCase().includes(kw));
+        filtered = filtered.filter(i => (i.nama && i.nama.toLowerCase().includes(kw)) || (i.nisn && String(i.nisn).toLowerCase().includes(kw)));
     }
-
-    filtered.sort((a, b) => {
-        if (a.status === 'Belum Absen' && b.status !== 'Belum Absen') return -1;
-        if (a.status !== 'Belum Absen' && b.status === 'Belum Absen') return 1;
-        return a.nama.localeCompare(b.nama);
-    });
 
     return filtered;
 }
@@ -303,15 +312,16 @@ function renderCurrentTab() {
 function renderDashboard() {
     document.getElementById('dashTotalSiswa').innerText = `${daftarSiswaCache.length} Siswa`;
     
-    let H = 0, S = 0, I = 0, A = 0;
+    let H = 0, S = 0, I = 0;
     const todayData = getFilteredData('today', '');
     
     todayData.forEach(item => {
         if(item.status === 'Hadir') H++;
         else if(item.status === 'Sakit') S++;
         else if(item.status === 'Izin') I++;
-        else if(item.status === 'Belum Absen') A++;
     });
+
+    const A = Math.max(0, daftarSiswaCache.length - (H + S + I));
 
     document.getElementById('dashHadir').innerText = H;
     document.getElementById('dashSakit').innerText = S;
@@ -323,17 +333,48 @@ function renderDashboard() {
 }
 
 function renderHarian() {
-    const keyword = searchHarian.value;
-    const data = getFilteredData('today', keyword);
+    const keyword = (searchHarian.value || '').toLowerCase();
+    const todayData = getFilteredData('today', '');
     const container = document.getElementById('listHarian');
     
-    if (!data.length) {
+    let list = [];
+    if (daftarSiswaCache.length > 0) {
+        const todayMap = {};
+        todayData.forEach(item => { todayMap[item.nisn] = item; });
+
+        list = daftarSiswaCache.map(s => {
+            if (todayMap[s.nisn]) return todayMap[s.nisn];
+            return {
+                nisn: s.nisn,
+                nama: s.nama,
+                tanggal: getTodayStr(),
+                waktu: '--:--',
+                status: 'Belum Absen',
+                foto: null,
+                alasan: ''
+            };
+        });
+    } else {
+        list = [...todayData];
+    }
+
+    if (keyword) {
+        list = list.filter(i => (i.nama && i.nama.toLowerCase().includes(keyword)) || (i.nisn && String(i.nisn).toLowerCase().includes(keyword)));
+    }
+
+    list.sort((a, b) => {
+        if (a.status === 'Belum Absen' && b.status !== 'Belum Absen') return 1;
+        if (a.status !== 'Belum Absen' && b.status === 'Belum Absen') return -1;
+        return (a.nama || '').localeCompare(b.nama || '');
+    });
+
+    if (!list.length) {
         container.innerHTML = `<div class="text-center text-slate-400 text-sm py-10 font-medium">Tidak ada data.</div>`;
         return;
     }
 
     let html = '';
-    data.forEach(item => {
+    list.forEach(item => {
         let badgeColor = item.status === 'Hadir' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
             item.status === 'Izin' ? 'bg-amber-50 text-amber-700 border-amber-200' :
             item.status === 'Belum Absen' ? 'bg-slate-100 text-slate-500 border-slate-300' : 'bg-rose-50 text-rose-700 border-rose-200';
@@ -360,16 +401,44 @@ function renderHarian() {
 }
 
 function isWorkingDay(dateStr) {
-    if (!pengaturanCache.tglMulai) return true;
-    let d = parseDate(dateStr); d.setHours(0,0,0,0);
-    let start = parseDate(pengaturanCache.tglMulai); start.setHours(0,0,0,0);
-    let end = pengaturanCache.tglSelesai ? parseDate(pengaturanCache.tglSelesai) : new Date(2100,0,1); end.setHours(23,59,59,999);
-    let now = new Date(); now.setHours(23,59,59,999);
-    
-    if (d < start || d > end || d > now) return false;
-    let day = d.getDay();
+    const d = parseDate(dateStr);
+    if (!d) return false;
+    d.setHours(0, 0, 0, 0);
+
+    // Weekend (0 = Minggu, 6 = Sabtu)
+    const day = d.getDay();
     if (day === 0 || day === 6) return false;
-    if (pengaturanCache.libur.includes(dateStr)) return false;
+
+    // Tidak boleh masa depan
+    const now = new Date();
+    now.setHours(23, 59, 59, 999);
+    if (d > now) return false;
+
+    // Batas periode jika ada pengaturan
+    if (pengaturanCache.tglMulai) {
+        const start = parseDate(pengaturanCache.tglMulai);
+        if (start) {
+            start.setHours(0, 0, 0, 0);
+            if (d < start) return false;
+        }
+    }
+    if (pengaturanCache.tglSelesai) {
+        const end = parseDate(pengaturanCache.tglSelesai);
+        if (end) {
+            end.setHours(23, 59, 59, 999);
+            if (d > end) return false;
+        }
+    }
+
+    // Cek hari libur
+    if (Array.isArray(pengaturanCache.libur) && pengaturanCache.libur.length > 0) {
+        const isLibur = pengaturanCache.libur.some(l => {
+            const ld = parseDate(l);
+            return ld && ld.getFullYear() === d.getFullYear() && ld.getMonth() === d.getMonth() && ld.getDate() === d.getDate();
+        });
+        if (isLibur) return false;
+    }
+
     return true;
 }
 
@@ -379,7 +448,7 @@ function renderPeriodik() {
     const data = getFilteredData(waktu, keyword);
     const container = document.getElementById('tablePeriodik');
 
-    if (!data.length && !pengaturanCache.tglMulai) {
+    if (!data.length && !pengaturanCache.tglMulai && daftarSiswaCache.length === 0) {
         container.innerHTML = `<div class="text-center text-slate-400 text-sm py-10 font-medium">Tidak ada data rekap.</div>`;
         return;
     }
@@ -393,14 +462,16 @@ function renderPeriodik() {
         
         // Hitung total hari kerja yang valid sejak tglMulai s.d Hari Ini
         let workingDatesCount = 0;
-        if (pengaturanCache.tglMulai) {
-            let startD = parseDate(pengaturanCache.tglMulai);
-            let endD = pengaturanCache.tglSelesai ? parseDate(pengaturanCache.tglSelesai) : new Date();
-            let nowD = new Date();
-            if (endD > nowD) endD = nowD;
-            
-            for(let curr = new Date(startD); curr <= endD; curr.setDate(curr.getDate()+1)) {
-                let currStr = `${curr.getDate().toString().padStart(2,'0')}/${(curr.getMonth()+1).toString().padStart(2,'0')}/${curr.getFullYear()}`;
+        let startD = parseDate(pengaturanCache.tglMulai);
+        let endD = pengaturanCache.tglSelesai ? parseDate(pengaturanCache.tglSelesai) : new Date();
+        let nowD = new Date();
+        if (endD && endD > nowD) endD = nowD;
+
+        if (startD) {
+            startD.setHours(0, 0, 0, 0);
+            if (endD) endD.setHours(0, 0, 0, 0);
+            for (let curr = new Date(startD); curr <= endD; curr.setDate(curr.getDate() + 1)) {
+                let currStr = `${curr.getDate().toString().padStart(2, '0')}/${(curr.getMonth() + 1).toString().padStart(2, '0')}/${curr.getFullYear()}`;
                 if (isWorkingDay(currStr)) workingDatesCount++;
             }
         }
@@ -410,21 +481,20 @@ function renderPeriodik() {
                 if (item.status === 'Hadir') stats[item.nisn].H++;
                 else if (item.status === 'Izin') stats[item.nisn].I++;
                 else if (item.status === 'Sakit') stats[item.nisn].S++;
+                else if (item.status === 'Alpha' || item.status === 'A') stats[item.nisn].A++;
             }
         });
 
         // Set Alpha
         Object.values(stats).forEach(s => {
-            if (pengaturanCache.tglMulai) {
+            if (startD) {
                 s.A = Math.max(0, workingDatesCount - (s.H + s.I + s.S));
-            } else {
-                s.A = data.filter(d => d.nisn === s.nisn && d.status === 'Belum Absen').length;
             }
         });
 
         // Terapkan search lagi karena object
         let statRows = Object.values(stats);
-        if(keyword) {
+        if (keyword) {
             const kw = keyword.toLowerCase();
             statRows = statRows.filter(s => s.nama.toLowerCase().includes(kw));
         }
@@ -459,24 +529,22 @@ function renderPeriodik() {
     } else {
         // MATRIX TABLE (WEEK / MONTH)
         let dates = [];
-        const now = new Date();
         
         if (waktu === 'week') {
-            let monday = getMondayFromWeek(weekSelector.value);
-            if(!monday) monday = new Date();
-            for(let i=0; i<7; i++) {
-                let d = new Date(monday);
+            let monday = getMondayFromWeek(weekSelector ? weekSelector.value : null) || getCurrentMonday();
+            for (let i = 0; i < 7; i++) {
+                let d = new Date(monday.getTime());
                 d.setDate(d.getDate() + i);
-                dates.push(`${d.getDate().toString().padStart(2,'0')}/${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getFullYear()}`);
+                dates.push(`${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`);
             }
         } else if (waktu === 'month') {
-            const monthVal = monthSelector.value || currentMonthStr;
-            const [yearStr, monthStr] = monthVal.split('-');
-            const year = parseInt(yearStr);
-            const month = parseInt(monthStr) - 1;
+            const monthVal = (monthSelector && monthSelector.value) || currentMonthStr;
+            const parsedMonth = parseDate(monthVal);
+            const year = parsedMonth ? parsedMonth.getFullYear() : parseInt(monthVal.split('-')[0]);
+            const month = parsedMonth ? parsedMonth.getMonth() : parseInt(monthVal.split('-')[1]) - 1;
             const daysInMonth = new Date(year, month + 1, 0).getDate();
-            for(let i=1; i<=daysInMonth; i++) {
-                dates.push(`${i.toString().padStart(2,'0')}/${(month+1).toString().padStart(2,'0')}/${year}`);
+            for (let i = 1; i <= daysInMonth; i++) {
+                dates.push(`${i.toString().padStart(2, '0')}/${(month + 1).toString().padStart(2, '0')}/${year}`);
             }
         }
 
@@ -487,9 +555,15 @@ function renderPeriodik() {
         });
 
         data.forEach(item => {
-            if (matrix[item.nisn] && matrix[item.nisn].records[item.tanggal] !== undefined) {
-                let stat = item.status === 'Hadir' ? 'H' : item.status === 'Izin' ? 'I' : item.status === 'Sakit' ? 'S' : '-';
-                matrix[item.nisn].records[item.tanggal] = stat;
+            if (matrix[item.nisn]) {
+                const itemD = parseDate(item.tanggal);
+                if (itemD) {
+                    const dStr = `${itemD.getDate().toString().padStart(2, '0')}/${(itemD.getMonth() + 1).toString().padStart(2, '0')}/${itemD.getFullYear()}`;
+                    if (matrix[item.nisn].records[dStr] !== undefined) {
+                        let stat = item.status === 'Hadir' ? 'H' : item.status === 'Izin' ? 'I' : item.status === 'Sakit' ? 'S' : (item.status === 'Alpha' || item.status === 'A' ? 'A' : '-');
+                        matrix[item.nisn].records[dStr] = stat;
+                    }
+                }
             }
         });
 
@@ -503,7 +577,7 @@ function renderPeriodik() {
         });
 
         let matrixRows = Object.values(matrix);
-        if(keyword) {
+        if (keyword) {
             const kw = keyword.toLowerCase();
             matrixRows = matrixRows.filter(s => s.nama.toLowerCase().includes(kw));
         }
@@ -566,11 +640,16 @@ function renderDetailSiswa() {
     const studentData = rawDataCache.filter(item => {
         if (item.nisn !== nisn) return false;
         const itemDate = parseDate(item.tanggal);
+        if (!itemDate) return false;
         return itemDate.getFullYear() == y && (itemDate.getMonth() + 1) == m;
     });
     
     // Sort by date ascending (oldest to newest)
-    studentData.sort((a,b) => parseDate(a.tanggal) - parseDate(b.tanggal));
+    studentData.sort((a,b) => {
+        const da = parseDate(a.tanggal);
+        const db = parseDate(b.tanggal);
+        return (da ? da.getTime() : 0) - (db ? db.getTime() : 0);
+    });
 
     if (!studentData.length) {
         listDetailSiswa.innerHTML = `<div class="text-center text-slate-400 text-sm py-10 font-medium">Tidak ada data kehadiran di bulan ini.</div>`;
@@ -1502,14 +1581,7 @@ async function generateAgendaHarianPrintView(nisn, fetchedData = null) {
     let tglMulai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglMulai) || (typeof configCache !== 'undefined' && configCache.tglMulai) || '09/06/2026';
     let tglSelesai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglSelesai) || (typeof configCache !== 'undefined' && configCache.tglSelesai) || '26/10/2026';
 
-    const parseTglStr = (str) => {
-        if (!str) return null;
-        if (str.includes('/')) {
-            const p = str.split('/');
-            if (p.length === 3) return new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10));
-        }
-        return new Date(str);
-    };
+    const parseTglStr = parseDate;
 
     let startDate = parseTglStr(tglMulai) || new Date(2026, 5, 9);
     if (startDate) startDate.setHours(0, 0, 0, 0);
@@ -1686,14 +1758,7 @@ async function generateAgendaDocxExport(nisn, btnElement) {
         let tglMulai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglMulai) || (typeof configCache !== 'undefined' && configCache.tglMulai) || '09/06/2026';
         let tglSelesai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglSelesai) || (typeof configCache !== 'undefined' && configCache.tglSelesai) || '26/10/2026';
 
-        const parseTglStr = (str) => {
-            if (!str) return null;
-            if (str.includes('/')) {
-                const p = str.split('/');
-                if (p.length === 3) return new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10));
-            }
-            return new Date(str);
-        };
+        const parseTglStr = parseDate;
 
         let startDate = parseTglStr(tglMulai) || new Date(2026, 5, 9);
         if (startDate) startDate.setHours(0, 0, 0, 0);
