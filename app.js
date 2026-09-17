@@ -14,9 +14,11 @@ const loadingOverlay = document.getElementById('loadingOverlay');
 
 const searchHarian = document.getElementById('searchHarian');
 const searchPeriodik = document.getElementById('searchPeriodik');
+const selectPeriodikSiswa = document.getElementById('selectPeriodikSiswa');
 const filterPeriodik = document.getElementById('filterPeriodik');
 const weekSelector = document.getElementById('weekSelector');
 const monthSelector = document.getElementById('monthSelector');
+const btnDownloadExcel = document.getElementById('btnDownloadExcel');
 const selectDetailSiswa = document.getElementById('selectDetailSiswa');
 const detailMonthSelector = document.getElementById('detailMonthSelector');
 const listDetailSiswa = document.getElementById('listDetailSiswa');
@@ -228,8 +230,9 @@ async function fetchData(namaGuru, bulan = null) {
             daftarSiswaCache = result.siswa || [];
             pengaturanCache = result.pengaturan || { tglMulai: '', tglSelesai: '', libur: [] };
             
-            // Populate Detail Siswa Select
+            // Populate Detail & Periodik Siswa Select
             selectDetailSiswa.innerHTML = '<option value="">-- Pilih Siswa --</option>';
+            if (selectPeriodikSiswa) selectPeriodikSiswa.innerHTML = '<option value="">-- Pilih Siswa --</option>';
             const selectJurnalSiswa = document.getElementById('selectJurnalSiswa');
             selectJurnalSiswa.innerHTML = '<option value="all">Semua Siswa</option>';
             daftarSiswaCache.forEach(s => {
@@ -237,6 +240,13 @@ async function fetchData(namaGuru, bulan = null) {
                 opt.value = s.nisn;
                 opt.textContent = s.nama;
                 selectDetailSiswa.appendChild(opt);
+
+                if (selectPeriodikSiswa) {
+                    const optP = document.createElement('option');
+                    optP.value = s.nisn;
+                    optP.textContent = s.nama;
+                    selectPeriodikSiswa.appendChild(optP);
+                }
                 
                 const opt2 = document.createElement('option');
                 opt2.value = s.nisn;
@@ -442,13 +452,76 @@ function isWorkingDay(dateStr) {
     return true;
 }
 
+function getRekapMatrixData(waktu, targetNisn = null, keyword = '') {
+    let dates = [];
+    if (waktu === 'week') {
+        let monday = getMondayFromWeek(weekSelector ? weekSelector.value : null) || getCurrentMonday();
+        for (let i = 0; i < 7; i++) {
+            let d = new Date(monday.getTime());
+            d.setDate(d.getDate() + i);
+            dates.push(`${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`);
+        }
+    } else if (waktu === 'month') {
+        const monthVal = (monthSelector && monthSelector.value) || currentMonthStr;
+        const parsedMonth = parseDate(monthVal);
+        const year = parsedMonth ? parsedMonth.getFullYear() : parseInt(monthVal.split('-')[0]);
+        const month = parsedMonth ? parsedMonth.getMonth() : parseInt(monthVal.split('-')[1]) - 1;
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        for (let i = 1; i <= daysInMonth; i++) {
+            dates.push(`${i.toString().padStart(2, '0')}/${(month + 1).toString().padStart(2, '0')}/${year}`);
+        }
+    }
+
+    let targetSiswa = daftarSiswaCache;
+    if (targetNisn) {
+        targetSiswa = daftarSiswaCache.filter(s => String(s.nisn) === String(targetNisn));
+    }
+
+    let matrix = {};
+    targetSiswa.forEach(s => {
+        matrix[s.nisn] = { nisn: s.nisn, nama: s.nama, records: {} };
+        dates.forEach(d => matrix[s.nisn].records[d] = '-');
+    });
+
+    const data = getFilteredData(waktu, '');
+    data.forEach(item => {
+        if (matrix[item.nisn]) {
+            const itemD = parseDate(item.tanggal);
+            if (itemD) {
+                const dStr = `${itemD.getDate().toString().padStart(2, '0')}/${(itemD.getMonth() + 1).toString().padStart(2, '0')}/${itemD.getFullYear()}`;
+                if (matrix[item.nisn].records[dStr] !== undefined) {
+                    let stat = item.status === 'Hadir' ? 'H' : item.status === 'Izin' ? 'I' : item.status === 'Sakit' ? 'S' : (item.status === 'Alpha' || item.status === 'A' ? 'A' : '-');
+                    matrix[item.nisn].records[dStr] = stat;
+                }
+            }
+        }
+    });
+
+    // Terapkan "A" pada hari kerja yang belum absen
+    dates.forEach(d => {
+        if (isWorkingDay(d)) {
+            Object.values(matrix).forEach(m => {
+                if (m.records[d] === '-') m.records[d] = 'A';
+            });
+        }
+    });
+
+    let matrixRows = Object.values(matrix);
+    if (keyword) {
+        const kw = keyword.toLowerCase();
+        matrixRows = matrixRows.filter(s => s.nama.toLowerCase().includes(kw));
+    }
+
+    return { dates, matrixRows };
+}
+
 function renderPeriodik() {
     const waktu = filterPeriodik.value;
+    const selectedNisn = selectPeriodikSiswa ? selectPeriodikSiswa.value : '';
     const keyword = searchPeriodik.value;
-    const data = getFilteredData(waktu, keyword);
     const container = document.getElementById('tablePeriodik');
 
-    if (!data.length && !pengaturanCache.tglMulai && daftarSiswaCache.length === 0) {
+    if (!pengaturanCache.tglMulai && daftarSiswaCache.length === 0) {
         container.innerHTML = `<div class="text-center text-slate-400 text-sm py-10 font-medium">Tidak ada data rekap.</div>`;
         return;
     }
@@ -457,8 +530,14 @@ function renderPeriodik() {
     
     if (waktu === 'all') {
         // SUMMARY TABLE
+        const data = getFilteredData(waktu, keyword);
+        let targetSiswa = daftarSiswaCache;
+        if (selectedNisn) {
+            targetSiswa = daftarSiswaCache.filter(s => String(s.nisn) === String(selectedNisn));
+        }
+
         let stats = {};
-        daftarSiswaCache.forEach(s => stats[s.nisn] = { nama: s.nama, H: 0, I: 0, S: 0, A: 0 });
+        targetSiswa.forEach(s => stats[s.nisn] = { nama: s.nama, H: 0, I: 0, S: 0, A: 0 });
         
         // Hitung total hari kerja yang valid sejak tglMulai s.d Hari Ini
         let workingDatesCount = 0;
@@ -528,59 +607,7 @@ function renderPeriodik() {
         html += `</tbody></table></div>`;
     } else {
         // MATRIX TABLE (WEEK / MONTH)
-        let dates = [];
-        
-        if (waktu === 'week') {
-            let monday = getMondayFromWeek(weekSelector ? weekSelector.value : null) || getCurrentMonday();
-            for (let i = 0; i < 7; i++) {
-                let d = new Date(monday.getTime());
-                d.setDate(d.getDate() + i);
-                dates.push(`${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`);
-            }
-        } else if (waktu === 'month') {
-            const monthVal = (monthSelector && monthSelector.value) || currentMonthStr;
-            const parsedMonth = parseDate(monthVal);
-            const year = parsedMonth ? parsedMonth.getFullYear() : parseInt(monthVal.split('-')[0]);
-            const month = parsedMonth ? parsedMonth.getMonth() : parseInt(monthVal.split('-')[1]) - 1;
-            const daysInMonth = new Date(year, month + 1, 0).getDate();
-            for (let i = 1; i <= daysInMonth; i++) {
-                dates.push(`${i.toString().padStart(2, '0')}/${(month + 1).toString().padStart(2, '0')}/${year}`);
-            }
-        }
-
-        let matrix = {};
-        daftarSiswaCache.forEach(s => {
-            matrix[s.nisn] = { nama: s.nama, records: {} };
-            dates.forEach(d => matrix[s.nisn].records[d] = '-');
-        });
-
-        data.forEach(item => {
-            if (matrix[item.nisn]) {
-                const itemD = parseDate(item.tanggal);
-                if (itemD) {
-                    const dStr = `${itemD.getDate().toString().padStart(2, '0')}/${(itemD.getMonth() + 1).toString().padStart(2, '0')}/${itemD.getFullYear()}`;
-                    if (matrix[item.nisn].records[dStr] !== undefined) {
-                        let stat = item.status === 'Hadir' ? 'H' : item.status === 'Izin' ? 'I' : item.status === 'Sakit' ? 'S' : (item.status === 'Alpha' || item.status === 'A' ? 'A' : '-');
-                        matrix[item.nisn].records[dStr] = stat;
-                    }
-                }
-            }
-        });
-
-        // Terapkan "A" pada hari kerja yang belum absen
-        dates.forEach(d => {
-            if (isWorkingDay(d)) {
-                Object.values(matrix).forEach(m => {
-                    if (m.records[d] === '-') m.records[d] = 'A';
-                });
-            }
-        });
-
-        let matrixRows = Object.values(matrix);
-        if (keyword) {
-            const kw = keyword.toLowerCase();
-            matrixRows = matrixRows.filter(s => s.nama.toLowerCase().includes(kw));
-        }
+        const { dates, matrixRows } = getRekapMatrixData(waktu, selectedNisn, keyword);
 
         html += `
         <div class="overflow-x-auto bg-white rounded-xl border border-slate-200 shadow-sm w-full relative">
@@ -951,7 +978,116 @@ detailMonthSelector.addEventListener('change', (e) => {
 
 document.getElementById('selectJurnalSiswa').addEventListener('change', renderJurnalGuru);
 
-document.getElementById('btnExportPdf').addEventListener('click', () => window.print());
+if (selectPeriodikSiswa) {
+    selectPeriodikSiswa.addEventListener('change', renderPeriodik);
+}
+
+function downloadExcelPeriodik() {
+    const selectedNisn = selectPeriodikSiswa ? selectPeriodikSiswa.value : '';
+    if (!selectedNisn) {
+        if (typeof showToast === 'function') {
+            showToast('Silakan pilih siswa terlebih dahulu!', 'error');
+        } else {
+            alert('Silakan pilih siswa terlebih dahulu!');
+        }
+        return;
+    }
+
+    if (typeof XLSX === 'undefined') {
+        if (typeof showToast === 'function') {
+            showToast('Library Excel belum siap. Silakan coba lagi.', 'error');
+        } else {
+            alert('Library Excel belum siap. Silakan coba lagi.');
+        }
+        return;
+    }
+
+    const siswa = daftarSiswaCache.find(s => String(s.nisn) === String(selectedNisn));
+    const namaSiswa = siswa ? siswa.nama : selectedNisn;
+    const waktu = filterPeriodik.value;
+
+    let rows = [];
+    rows.push(['REKAP KEHADIRAN SISWA PRAKERIN / PSG']);
+    rows.push(['Nama Siswa', namaSiswa]);
+    rows.push(['NISN', selectedNisn]);
+
+    if (waktu === 'all') {
+        rows.push(['Periode', 'Semua Data']);
+        rows.push([]);
+        rows.push(['No', 'Nama Siswa', 'Hadir', 'Sakit', 'Izin', 'Alpha']);
+
+        const data = getFilteredData('all', '');
+        let stat = { H: 0, I: 0, S: 0, A: 0 };
+
+        let workingDatesCount = 0;
+        let startD = parseDate(pengaturanCache.tglMulai);
+        let endD = pengaturanCache.tglSelesai ? parseDate(pengaturanCache.tglSelesai) : new Date();
+        let nowD = new Date();
+        if (endD && endD > nowD) endD = nowD;
+
+        if (startD) {
+            startD.setHours(0, 0, 0, 0);
+            if (endD) endD.setHours(0, 0, 0, 0);
+            for (let curr = new Date(startD); curr <= endD; curr.setDate(curr.getDate() + 1)) {
+                let currStr = `${curr.getDate().toString().padStart(2, '0')}/${(curr.getMonth() + 1).toString().padStart(2, '0')}/${curr.getFullYear()}`;
+                if (isWorkingDay(currStr)) workingDatesCount++;
+            }
+        }
+
+        data.forEach(item => {
+            if (String(item.nisn) === String(selectedNisn)) {
+                if (item.status === 'Hadir') stat.H++;
+                else if (item.status === 'Izin') stat.I++;
+                else if (item.status === 'Sakit') stat.S++;
+                else if (item.status === 'Alpha' || item.status === 'A') stat.A++;
+            }
+        });
+
+        if (startD) {
+            stat.A = Math.max(0, workingDatesCount - (stat.H + stat.I + stat.S));
+        }
+
+        rows.push([1, namaSiswa, stat.H, stat.S, stat.I, stat.A]);
+    } else {
+        const { dates, matrixRows } = getRekapMatrixData(waktu, selectedNisn, '');
+        const targetRow = matrixRows[0] || { records: {} };
+
+        let headerPeriode = waktu === 'week' ? `Mingguan (${dates[0]} - ${dates[dates.length - 1]})` : `Bulanan (${monthSelector ? monthSelector.value : currentMonthStr})`;
+        rows.push(['Periode', headerPeriode]);
+        rows.push([]);
+
+        let headerCols = ['No', 'NISN', 'Nama Siswa', ...dates, 'H', 'S', 'I', 'A'];
+        rows.push(headerCols);
+
+        let totalH = 0, totalS = 0, totalI = 0, totalA = 0;
+        let dateValues = dates.map(d => {
+            let s = targetRow.records[d] || '-';
+            if (s === 'H') totalH++;
+            else if (s === 'S') totalS++;
+            else if (s === 'I') totalI++;
+            else if (s === 'A') totalA++;
+            return s;
+        });
+
+        rows.push([1, selectedNisn, namaSiswa, ...dateValues, totalH, totalS, totalI, totalA]);
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Rekap_Kehadiran');
+
+    const safeName = namaSiswa.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `Rekap_${safeName}_${waktu}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, filename);
+
+    if (typeof showToast === 'function') {
+        showToast('Berhasil mengunduh rekap Excel!', 'success');
+    }
+}
+
+if (btnDownloadExcel) {
+    btnDownloadExcel.addEventListener('click', downloadExcelPeriodik);
+}
 
 
 // ===== FITUR CETAK JURNAL A4 (PEMBIMBING) =====
@@ -1447,11 +1583,9 @@ document.addEventListener("click", async (e) => {
         const selectEl = document.getElementById("selectDetailSiswa");
         let selectedNisn = selectEl ? selectEl.value : "";
         if (!selectedNisn) {
-            if (typeof daftarSiswaCache !== "undefined" && daftarSiswaCache.length > 0) {
-                selectedNisn = daftarSiswaCache[0].nisn;
-            } else {
-                selectedNisn = "10244";
-            }
+            if (typeof showToast === "function") showToast("Silakan pilih siswa terlebih dahulu di dropdown", "error");
+            else alert("Silakan pilih siswa terlebih dahulu di dropdown");
+            return;
         }
 
         const originalText = btn.innerHTML;
@@ -1517,6 +1651,11 @@ document.addEventListener("click", async (e) => {
         e.preventDefault();
         const selectEl = document.getElementById("selectDetailSiswa");
         let selectedNisn = selectEl ? selectEl.value : "";
+        if (!selectedNisn) {
+            if (typeof showToast === "function") showToast("Silakan pilih siswa terlebih dahulu di dropdown", "error");
+            else alert("Silakan pilih siswa terlebih dahulu di dropdown");
+            return;
+        }
         generateAgendaDocxExport(selectedNisn, docxAgendaBtn);
     }
 
@@ -1579,13 +1718,13 @@ async function generateAgendaHarianPrintView(nisn, fetchedData = null) {
     studentJurnal.forEach(j => registerEntry(j.tanggal || j.weekStart, j, 'jurnal'));
 
     let tglMulai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglMulai) || (typeof configCache !== 'undefined' && configCache.tglMulai) || '09/06/2026';
-    let tglSelesai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglSelesai) || (typeof configCache !== 'undefined' && configCache.tglSelesai) || '26/10/2026';
+    let tglSelesai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglSelesai) || (typeof configCache !== 'undefined' && configCache.tglSelesai) || '26/09/2026';
 
     const parseTglStr = parseDate;
 
     let startDate = parseTglStr(tglMulai) || new Date(2026, 5, 9);
     if (startDate) startDate.setHours(0, 0, 0, 0);
-    let endDate = parseTglStr(tglSelesai) || new Date(2026, 9, 26);
+    let endDate = parseTglStr(tglSelesai) || new Date(2026, 8, 26);
     if (endDate) endDate.setHours(23, 59, 59, 999);
 
     const daysName = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -1606,7 +1745,8 @@ async function generateAgendaHarianPrintView(nisn, fetchedData = null) {
         const matchJurnal = record ? record.jurnal : null;
 
         if (matchAbsensi || matchJurnal) {
-            let ket = (matchAbsensi && matchAbsensi.status) ? matchAbsensi.status : "Hadir";
+            let rawStatus = (matchAbsensi && matchAbsensi.status) ? matchAbsensi.status : "Hadir";
+            let ket = (rawStatus === "Alpha" || rawStatus === "A") ? "Alpha" : rawStatus;
             let uraianRaw = (matchAbsensi && (matchAbsensi.agenda || matchAbsensi.agendaHarian || matchAbsensi.kegiatan || matchAbsensi.alasan || matchAbsensi.keterangan)) 
                          || (matchJurnal && (matchJurnal.keterangan || matchJurnal.agenda || matchJurnal.jurnal))
                          || (matchAbsensi && matchAbsensi.status === "Sakit" ? "Sakit" : (matchAbsensi && matchAbsensi.status === "Izin" ? "Izin" : "-"));
@@ -1624,11 +1764,11 @@ async function generateAgendaHarianPrintView(nisn, fetchedData = null) {
                 uraian: uraianStr || "-"
             });
         } else {
-            const isMinggu = (dayIdx === 0);
+            const working = isWorkingDay(formattedTgl);
             agendaRows.push({
                 hariTanggal: hariTanggalCombined,
-                keterangan: isMinggu ? "Libur" : "Alpha",
-                uraian: isMinggu ? "Libur" : "-"
+                keterangan: working ? "Alpha" : "Libur",
+                uraian: working ? "-" : "Libur"
             });
         }
         cur.setDate(cur.getDate() + 1);
@@ -1644,11 +1784,13 @@ async function generateAgendaHarianPrintView(nisn, fetchedData = null) {
 
         pageItems.forEach((row, idx) => {
             const rowNo = (p * itemsPerPage) + idx + 1;
+            const ketClass = row.keterangan === 'Alpha' ? 'text-rose-600 agenda-status-alpha' : (row.keterangan === 'Libur' ? 'text-slate-400' : 'text-slate-900');
+            const ketStyle = row.keterangan === 'Alpha' ? 'style="color: #dc2626 !important;"' : (row.keterangan === 'Libur' ? 'style="color: #94a3b8;"' : '');
             tableRowsHtml += `
                 <tr class="border-b border-slate-900 text-center font-medium">
                     <td class="border-r border-slate-900 px-2 py-1.5">${rowNo}</td>
                     <td class="border-r border-slate-900 px-1.5 py-1.5 whitespace-nowrap text-left text-[11px] font-semibold">${row.hariTanggal}</td>
-                    <td class="border-r border-slate-900 px-2 py-1.5 font-bold">${row.keterangan}</td>
+                    <td class="border-r border-slate-900 px-2 py-1.5 font-bold ${ketClass}" ${ketStyle}>${row.keterangan}</td>
                     <td class="px-3 py-1.5 text-left uppercase">${row.uraian}</td>
                 </tr>
             `;
@@ -1702,6 +1844,9 @@ async function generateAgendaHarianPrintView(nisn, fetchedData = null) {
     const printAreaContainer = document.getElementById("printAreaAgendaContainer");
     if (printAreaContainer) {
         printAreaContainer.innerHTML = pagesHtml;
+        printAreaContainer
+            .querySelectorAll('td.agenda-status-alpha')
+            .forEach(cell => cell.style.setProperty('color', '#dc2626', 'important'));
     } else {
         console.error("Target container printAreaAgendaContainer not found in DOM");
     }
@@ -1712,6 +1857,12 @@ async function generateAgendaDocxExport(nisn, btnElement) {
 
     if (!docxLib) {
         alert("Library docx belum siap di browser. Pastikan koneksi terhubung dan refresh halaman.");
+        return;
+    }
+
+    if (!nisn) {
+        if (typeof showToast === "function") showToast("Silakan pilih siswa terlebih dahulu di dropdown", "error");
+        else alert("Silakan pilih siswa terlebih dahulu di dropdown");
         return;
     }
 
@@ -1756,13 +1907,13 @@ async function generateAgendaDocxExport(nisn, btnElement) {
         });
 
         let tglMulai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglMulai) || (typeof configCache !== 'undefined' && configCache.tglMulai) || '09/06/2026';
-        let tglSelesai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglSelesai) || (typeof configCache !== 'undefined' && configCache.tglSelesai) || '26/10/2026';
+        let tglSelesai = (typeof pengaturanCache !== 'undefined' && pengaturanCache.tglSelesai) || (typeof configCache !== 'undefined' && configCache.tglSelesai) || '26/09/2026';
 
         const parseTglStr = parseDate;
 
         let startDate = parseTglStr(tglMulai) || new Date(2026, 5, 9);
         if (startDate) startDate.setHours(0, 0, 0, 0);
-        let endDate = parseTglStr(tglSelesai) || new Date(2026, 9, 26);
+        let endDate = parseTglStr(tglSelesai) || new Date(2026, 8, 26);
         if (endDate) endDate.setHours(23, 59, 59, 999);
 
         const daysName = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -1780,7 +1931,8 @@ async function generateAgendaDocxExport(nisn, btnElement) {
 
             const record = absensiMap[formattedTgl] || absensiMap[`${parseInt(dd)}/${parseInt(mm)}/${yyyy}`];
             if (record) {
-                let ket = record.status || "Hadir";
+                let rawStatus = record.status || "Hadir";
+                let ket = (rawStatus === "Alpha" || rawStatus === "A") ? "Alpha" : rawStatus;
                 let uraianRaw = record.agenda || record.agendaHarian || record.kegiatan || record.alasan || record.keterangan || "-";
                 let uraianStr = String(uraianRaw || "-").trim();
                 if (/^foto\s*\d*[\s:.\-]*$/i.test(uraianStr)) {
@@ -1795,11 +1947,11 @@ async function generateAgendaDocxExport(nisn, btnElement) {
                     uraian: uraianStr || "-"
                 });
             } else {
-                const isMinggu = (dayIdx === 0);
+                const working = isWorkingDay(formattedTgl);
                 agendaRows.push({
                     hariTanggal: hariTanggalCombined,
-                    keterangan: isMinggu ? "Libur" : "Alpha",
-                    uraian: isMinggu ? "Libur" : "-"
+                    keterangan: working ? "Alpha" : "Libur",
+                    uraian: working ? "-" : "Libur"
                 });
             }
             cur.setDate(cur.getDate() + 1);
@@ -1822,7 +1974,7 @@ async function generateAgendaDocxExport(nisn, btnElement) {
                 children: [
                     new TableCell({ width: { size: 8, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: `${idx + 1}`, size: 20 })], alignment: AlignmentType.CENTER })] }),
                     new TableCell({ width: { size: 20, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: row.hariTanggal, bold: true, size: 19 })] })] }),
-                    new TableCell({ width: { size: 14, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: row.keterangan, bold: true, size: 19 })], alignment: AlignmentType.CENTER })] }),
+                    new TableCell({ width: { size: 14, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: row.keterangan, bold: true, size: 19, color: row.keterangan === 'Alpha' ? "E11D48" : undefined })], alignment: AlignmentType.CENTER })] }),
                     new TableCell({ width: { size: 60, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [new TextRun({ text: row.uraian.toUpperCase(), size: 19 })] })] })
                 ]
             })

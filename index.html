@@ -60,16 +60,21 @@
         .jurnal-status-bar { height: 4px; border-radius: 9999px; background: #E2E8F0; overflow: hidden; }
         .jurnal-status-fill { height: 100%; border-radius: 9999px; transition: width 0.4s ease; }
 
+        td.agenda-status-alpha,
+        #printAreaAgendaContainer td.agenda-status-alpha,
+        .agenda-status-alpha { color: #dc2626 !important; }
+
         /* Print/PDF Export Styles */
         @media print {
             body { background: white !important; }
             body * { visibility: hidden; }
             #mainApp, #mainApp * { visibility: visible; color: black !important; }
             #mainApp { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; border: none !important; margin: 0; padding: 0; }
-            header, nav, #btnExportPdf, .no-print, input, select { display: none !important; }
+            header, nav, .no-print, input, select { display: none !important; }
             .overflow-x-auto { overflow: visible !important; }
         }
     </style>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
     <script src="https://unpkg.com/docx@7.3.0/build/index.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 </head>
@@ -211,14 +216,17 @@
                     <!-- TAB: PERIODIK -->
                     <div id="tab-periodik" class="tab-content animate-fadeIn space-y-4 hidden flex-col h-full">
                         <div class="flex flex-col gap-2 shrink-0 no-print">
-                            <div class="flex gap-2">
-                                <select id="filterPeriodik" class="flex-1 bg-white border border-slate-200 text-slate-700 font-medium text-sm rounded-xl px-3 py-2.5 outline-none focus:border-primary shadow-sm cursor-pointer">
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <select id="selectPeriodikSiswa" class="flex-1 bg-white border border-slate-200 text-slate-700 font-medium text-sm rounded-xl px-3 py-2.5 outline-none focus:border-primary shadow-sm cursor-pointer min-w-0">
+                                    <option value="">-- Pilih Siswa --</option>
+                                </select>
+                                <select id="filterPeriodik" class="bg-white border border-slate-200 text-slate-700 font-medium text-sm rounded-xl px-3 py-2.5 outline-none focus:border-primary shadow-sm cursor-pointer">
                                     <option value="week">Mingguan</option>
                                     <option value="month">Bulanan</option>
-                                    <option value="all">Semua Waktu (Summary)</option>
                                 </select>
-                                <button id="btnExportPdf" class="bg-primary text-white p-2.5 px-3 rounded-xl shadow-sm flex items-center justify-center gap-1.5 text-sm font-semibold hover:bg-blue-900 transition-colors" title="Cetak PDF">
-                                    <i class="ph ph-printer text-lg"></i>
+                                <button id="btnDownloadExcel" class="bg-emerald-600 text-white px-3 py-2.5 rounded-xl shadow-sm flex items-center justify-center gap-1.5 text-sm font-semibold hover:bg-emerald-700 transition-colors shrink-0" title="Download Excel">
+                                    <i class="ph ph-file-xls text-lg"></i>
+                                    <span>Download Excel</span>
                                 </button>
                             </div>
                             <input type="week" id="weekSelector" class="w-full bg-white border border-slate-200 text-slate-700 font-medium text-sm rounded-xl px-3 py-2.5 outline-none focus:border-primary shadow-sm">
