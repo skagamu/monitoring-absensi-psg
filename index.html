@@ -60,23 +60,20 @@
         .jurnal-status-bar { height: 4px; border-radius: 9999px; background: #E2E8F0; overflow: hidden; }
         .jurnal-status-fill { height: 100%; border-radius: 9999px; transition: width 0.4s ease; }
 
-        td.agenda-status-alpha,
-        #printAreaAgendaContainer td.agenda-status-alpha,
-        .agenda-status-alpha { color: #dc2626 !important; }
-
-        /* Print/PDF Export Styles */
-        @media print {
-            body { background: white !important; }
-            body * { visibility: hidden; }
-            #mainApp, #mainApp * { visibility: visible; color: black !important; }
-            #mainApp { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; border: none !important; margin: 0; padding: 0; }
-            header, nav, .no-print, input, select { display: none !important; }
-            .overflow-x-auto { overflow: visible !important; }
-        }
+        .pdf-frame { width: 100%; height: min(72vh, 820px); border: 0; background: #fff; }
     </style>
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
-    <script src="https://unpkg.com/docx@7.3.0/build/index.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.20/build/pdfmake.min.js"></script>
+    <script src="fonts/vfs_fonts.js"></script>
+    <script>
+        pdfMake.fonts = {
+            Carlito: {
+                normal: 'Carlito-Regular.ttf',
+                bold: 'Carlito-Bold.ttf',
+                italics: 'Carlito-Italic.ttf',
+                bolditalics: 'Carlito-BoldItalic.ttf'
+            }
+        };
+    </script>
 </head>
 <body class="text-slate-800 min-h-screen flex items-center justify-center relative overflow-hidden antialiased">
 
@@ -224,9 +221,9 @@
                                     <option value="week">Mingguan</option>
                                     <option value="month">Bulanan</option>
                                 </select>
-                                <button id="btnDownloadExcel" class="bg-emerald-600 text-white px-3 py-2.5 rounded-xl shadow-sm flex items-center justify-center gap-1.5 text-sm font-semibold hover:bg-emerald-700 transition-colors shrink-0" title="Download Excel">
-                                    <i class="ph ph-file-xls text-lg"></i>
-                                    <span>Download Excel</span>
+                                <button id="btnDownloadRekapPdf" class="bg-emerald-600 text-white px-3 py-2.5 rounded-xl shadow-sm flex items-center justify-center gap-1.5 text-sm font-semibold hover:bg-emerald-700 transition-colors shrink-0" title="Unduh PDF">
+                                    <i class="ph ph-file-pdf text-lg"></i>
+                                    <span>Unduh PDF</span>
                                 </button>
                             </div>
                             <input type="week" id="weekSelector" class="w-full bg-white border border-slate-200 text-slate-700 font-medium text-sm rounded-xl px-3 py-2.5 outline-none focus:border-primary shadow-sm">
@@ -312,74 +309,28 @@
         }
     </script>
 
-    <!-- Modal Pratinjau Cetak Jurnal A4 -->
-    <div id="modalCetakJurnal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] hidden items-center justify-center p-4 overflow-y-auto">
-        <div class="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden no-print-modal">
-            <!-- Header Modal -->
-            <div class="px-4 py-3 sm:px-6 sm:py-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50 shrink-0">
-                <div class="flex items-center justify-between w-full sm:w-auto">
-                    <div class="flex items-center gap-2">
-                        <i class="ph ph-file-text text-primary text-xl"></i>
-                        <h3 class="font-bold text-slate-800 text-sm sm:text-base">Pratinjau Jurnal</h3>
-                    </div>
-                    <button id="btnCloseModalMobile" class="sm:hidden text-slate-400 hover:text-slate-600 p-1 text-xl">
+    <!-- Pratinjau PDF (Blob yang sama dengan unduhan) -->
+    <div id="modalPdfPreview" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[150] hidden items-center justify-center p-4">
+        <div class="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50 shrink-0">
+                <div class="flex items-center justify-between w-full sm:w-auto gap-2">
+                    <h3 id="pdfPreviewTitle" class="font-bold text-slate-800 text-sm sm:text-base">Pratinjau PDF</h3>
+                    <button id="btnClosePdfPreviewMobile" type="button" class="sm:hidden text-slate-400 hover:text-slate-600 p-1 text-xl" aria-label="Tutup">
                         <i class="ph ph-x"></i>
                     </button>
                 </div>
-                <div class="flex items-center gap-2 w-full sm:w-auto flex-wrap">
-                    <button id="btnDownloadDocx" class="flex-1 sm:flex-none bg-blue-600 text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
-                        <i class="ph ph-file-doc text-base"></i> Download Word
+                <div class="flex items-center gap-2 w-full sm:w-auto">
+                    <button id="btnDownloadPdf" type="button" class="flex-1 sm:flex-none bg-indigo-600 text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                        <i class="ph ph-download-simple text-base"></i> Unduh PDF
                     </button>
-                    <button id="btnDoPrint" class="flex-1 sm:flex-none bg-primary text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-blue-900 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
-                        <i class="ph ph-printer text-base"></i> Cetak / Simpan PDF
-                    </button>
-                    <button id="btnCloseModal" class="hidden sm:block text-slate-400 hover:text-slate-600 p-2 rounded-xl text-xl">
+                    <button id="btnClosePdfPreview" type="button" class="hidden sm:block text-slate-400 hover:text-slate-600 p-2 rounded-xl text-xl" aria-label="Tutup">
                         <i class="ph ph-x"></i>
                     </button>
                 </div>
             </div>
-            <!-- Body Pratinjau Lembar A4 -->
-            <div class="p-4 md:p-8 overflow-y-auto flex-1 bg-slate-500/30 flex justify-center items-start">
-                <div class="w-full max-w-[210mm] flex justify-center overflow-x-auto py-4">
-                    <div id="printAreaContainer" class="bg-transparent text-slate-900 font-sans text-xs w-[210mm] shrink-0 origin-top transform scale-[0.85] sm:scale-100 transition-transform space-y-8">
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal Pratinjau Cetak Agenda Harian PKL (5 Kolom) -->
-    <div id="modalCetakAgendaHarian" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[150] hidden items-center justify-center p-4 overflow-y-auto">
-        <div class="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden no-print-modal">
-            <!-- Header Modal -->
-            <div class="px-4 py-3 sm:px-6 sm:py-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50 shrink-0">
-                <div class="flex items-center justify-between w-full sm:w-auto">
-                    <div class="flex items-center gap-2">
-                        <i class="ph ph-notebook text-indigo-600 text-xl"></i>
-                        <h3 class="font-bold text-slate-800 text-sm sm:text-base">Pratinjau Agenda Harian PKL</h3>
-                    </div>
-                    <button id="btnCloseModalAgendaMobile" class="sm:hidden text-slate-400 hover:text-slate-600 p-1 text-xl">
-                        <i class="ph ph-x"></i>
-                    </button>
-                </div>
-                <div class="flex items-center gap-2 w-full sm:w-auto flex-wrap">
-                    <button id="btnDownloadDocxAgenda" class="flex-1 sm:flex-none bg-indigo-600 text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
-                        <i class="ph ph-file-doc text-base"></i> Download Word
-                    </button>
-                    <button id="btnDoPrintAgenda" class="flex-1 sm:flex-none bg-primary text-white px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold hover:bg-blue-900 transition-colors flex items-center justify-center gap-1.5 shadow-sm">
-                        <i class="ph ph-printer text-base"></i> Cetak / Simpan PDF
-                    </button>
-                    <button id="btnCloseModalAgenda" class="hidden sm:block text-slate-400 hover:text-slate-600 p-2 rounded-xl text-xl">
-                        <i class="ph ph-x"></i>
-                    </button>
-                </div>
-            </div>
-            <!-- Body Pratinjau Lembar A4 -->
-            <div class="p-4 md:p-8 overflow-y-auto flex-1 bg-slate-500/30 flex justify-center items-start">
-                <div class="w-full max-w-[210mm] flex justify-center overflow-x-auto py-4">
-                    <div id="printAreaAgendaContainer" class="bg-transparent text-slate-900 font-sans text-xs w-[210mm] shrink-0 origin-top transform scale-[0.85] sm:scale-100 transition-transform space-y-8">
-                    </div>
-                </div>
+            <div class="p-3 flex-1 bg-slate-200 min-h-0">
+                <iframe id="pdfPreviewFrame" class="pdf-frame rounded-lg" title="Pratinjau PDF"></iframe>
+                <p id="pdfPreviewFallback" class="hidden text-sm text-slate-600 mt-3">Penampil PDF bawaan tidak tersedia di perangkat ini. Pakai tombol Unduh PDF — berkas sama dengan pratinjau.</p>
             </div>
         </div>
     </div>
