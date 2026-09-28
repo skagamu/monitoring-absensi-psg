@@ -1226,7 +1226,7 @@ function agendaDocDefinition(info, rows) {
     });
     return {
         pageSize: 'A4',
-        pageMargins: [28, 28, 28, 36],
+        pageMargins: [57, 28, 28, 36],
         footer: (current) => ({ text: String(current), alignment: 'right', margin: [0, 8, 28, 0], fontSize: 8, color: '#64748b' }),
         content: [
             { text: 'AGENDA HARIAN PKL', bold: true, fontSize: 14, alignment: 'center' },
@@ -1243,30 +1243,55 @@ function driveFileId(url) {
     return m ? m[1] : null;
 }
 
-function loadImageData(rawUrl) {
+async function loadImageData(rawUrl) {
     const id = driveFileId(rawUrl);
+    const thumbUrl = id ? 'https://drive.google.com/thumbnail?id=' + id + '&sz=w800' : rawUrl;
     const candidates = id ? [
-        'https://drive.google.com/thumbnail?id=' + id + '&sz=w800',
+        thumbUrl,
         'https://lh3.googleusercontent.com/d/' + id + '=w800',
-        rawUrl
-    ] : [rawUrl];
-    const tryOne = (idx) => new Promise((resolve, reject) => {
-        if (idx >= candidates.length) return reject(new Error('Foto dokumentasi gagal dimuat. PDF tidak dibuat tanpa gambar.'));
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => {
-            try {
-                const canvas = document.createElement('canvas');
-                canvas.width = img.naturalWidth || 600;
-                canvas.height = img.naturalHeight || 400;
-                canvas.getContext('2d').drawImage(img, 0, 0);
-                resolve({ data: canvas.toDataURL('image/jpeg', 0.86), w: canvas.width, h: canvas.height });
-            } catch (err) { tryOne(idx + 1).then(resolve, reject); }
-        };
-        img.onerror = () => tryOne(idx + 1).then(resolve, reject);
-        img.src = candidates[idx];
-    });
-    return tryOne(0);
+        rawUrl,
+        'https://corsproxy.io/?url=' + encodeURIComponent(thumbUrl)
+    ] : [
+        rawUrl,
+        'https://corsproxy.io/?url=' + encodeURIComponent(rawUrl)
+    ];
+
+    for (const url of candidates) {
+        try {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('Fetch failed');
+            const ct = res.headers.get('content-type') || '';
+            if (!ct.startsWith('image')) throw new Error('Content-Type bukan image');
+
+            const blob = await res.blob();
+            const base64 = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+
+            return await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.naturalWidth || 600;
+                        canvas.height = img.naturalHeight || 400;
+                        canvas.getContext('2d').drawImage(img, 0, 0);
+                        resolve({ data: canvas.toDataURL('image/jpeg', 0.86), w: canvas.width, h: canvas.height });
+                    } catch (err) {
+                        reject(err);
+                    }
+                };
+                img.onerror = reject;
+                img.src = base64;
+            });
+        } catch (e) {
+            // Coba kandidat berikutnya
+        }
+    }
+    throw new Error('Foto dokumentasi gagal dimuat. PDF tidak dibuat tanpa gambar.');
 }
 
 function jurnalPages(entries) {
@@ -1298,7 +1323,7 @@ async function jurnalDocDefinition(info, pages) {
             image = { text: '[ Foto Dokumentasi ]', italics: true, color: '#64748b', alignment: 'center', margin: [0, 12, 0, 12] };
         }
         const lines = [];
-        for (let n = 0; n < 10; n++) lines.push([{ text: ' ', fontSize: 10 }]);
+        for (let n = 0; n < 16; n++) lines.push([{ text: ' ', fontSize: 10 }]);
         content.push(
             { text: 'LEMBAR KEGIATAN HARIAN PKL', bold: true, fontSize: 14, alignment: 'center', margin: [0, 0, 0, 6] },
             identBlock(info.student, info.kelas, info.tempat, info.namaGuru),
@@ -1308,20 +1333,20 @@ async function jurnalDocDefinition(info, pages) {
             image,
             { text: 'Uraian Kegiatan/Pekerjaan :', bold: true, margin: [0, 4, 0, 2] },
             {
-                table: { widths: ['*'], heights: lines.map(() => 22), body: lines },
+                table: { widths: ['*'], heights: lines.map(() => 14), body: lines },
                 layout: {
                     hLineWidth: (idx) => idx === 0 ? 0 : 0.7,
                     vLineWidth: () => 0,
                     hLineColor: () => '#64748b',
                     hLineStyle: (idx) => idx === 0 ? null : { dash: { length: 2, space: 2 } },
-                    paddingTop: () => 10,
+                    paddingTop: () => 6,
                     paddingBottom: () => 0
                 }
             },
             i < pages.length - 1 ? { text: '', pageBreak: 'after' } : { text: '' }
         );
     }
-    return { pageSize: 'A4', pageMargins: [32, 28, 32, 28], content };
+    return { pageSize: 'A4', pageMargins: [57, 28, 32, 28], content };
 }
 
 async function fetchJson(action, namaGuru) {
