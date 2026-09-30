@@ -1349,13 +1349,41 @@ async function jurnalDocDefinition(info, pages) {
     return { pageSize: 'A4', pageMargins: [57, 28, 32, 28], content };
 }
 
-async function fetchJson(action, namaGuru) {
-    const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=${action}&namaGuru=${encodeURIComponent(namaGuru)}&bulan=all`);
+async function fetchJson(action, namaGuru, customBulan = 'all') {
+    const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=${action}&namaGuru=${encodeURIComponent(namaGuru)}&bulan=${customBulan}`);
+    if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
     const text = await res.text();
-    if (!text.startsWith('{') && !text.startsWith('[')) throw new Error('Respons server bukan data.');
-    const json = JSON.parse(text);
-    if (json.status !== 'success' || !Array.isArray(json.data)) throw new Error('Data server gagal dibaca.');
-    return json.data;
+    if (!text.startsWith('{') && !text.startsWith('[')) throw new Error('Data terlalu besar/Server timeout.');
+    try {
+        const json = JSON.parse(text);
+        if (json.status !== 'success' || !Array.isArray(json.data)) throw new Error('Data server gagal dibaca.');
+        return json.data;
+    } catch (e) {
+        throw new Error('Respons JSON rusak.');
+    }
+}
+
+// Fungsi Batching
+async function fetchAllMonthsData(action, namaGuru, onProgress) {
+    const months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    const WAVE = 3;
+    const combined = [];
+    
+    for (let i = 0; i < months.length; i += WAVE) {
+        const wave = months.slice(i, i + WAVE);
+        const results = await Promise.all(wave.map(async (bulan) => {
+            try {
+                const data = await fetchJson(action, namaGuru, bulan);
+                if (onProgress) onProgress(1); // Tambah 1 selesai
+                return data;
+            } catch (err) {
+                if (onProgress) onProgress(1); // Gagal tetap dihitung selesai
+                return [];
+            }
+        }));
+        results.forEach(d => { if (Array.isArray(d)) combined.push(...d); });
+    }
+    return combined;
 }
 
 document.addEventListener('click', async (e) => {
@@ -1365,11 +1393,18 @@ document.addEventListener('click', async (e) => {
         if (!nisn || nisn === 'all') return notify('Silakan pilih siswa terlebih dahulu di dropdown', 'error');
         const original = jurnalBtn.innerHTML;
         jurnalBtn.disabled = true;
-        jurnalBtn.innerHTML = `<i class="ph ph-spinner animate-spin text-lg"></i> Menyusun PDF...`;
+        jurnalBtn.innerHTML = `<i class="ph ph-spinner animate-spin text-lg"></i> Mengunduh bln 0/12...`;
         try {
             const info = requireStudent(nisn);
-            const data = (await fetchJson('getJurnalGuru', info.namaGuru)).filter(j => String(j.nisn) === String(nisn));
+            let doneBulan = 0;
+            const jurnalAll = await fetchAllMonthsData('getJurnalGuru', info.namaGuru, (tambah) => {
+                doneBulan += tambah;
+                jurnalBtn.innerHTML = `<i class="ph ph-spinner animate-spin text-lg"></i> Jurnal bln ${doneBulan}/12...`;
+            });
+            const data = jurnalAll.filter(j => String(j.nisn) === String(nisn));
             if (!data.length) throw new Error('Jurnal siswa kosong. PDF tidak dibuat dengan judul contoh.');
+            
+            jurnalBtn.innerHTML = `<i class="ph ph-spinner animate-spin text-lg"></i> Menyusun PDF...`;
             const pages = jurnalPages(data);
             if (!pages.length) throw new Error('Tidak ada halaman jurnal.');
             const built = await createPdfBlob(await jurnalDocDefinition(info, pages));
@@ -1389,16 +1424,26 @@ document.addEventListener('click', async (e) => {
     if (!nisn) return notify('Silakan pilih siswa terlebih dahulu di dropdown', 'error');
     const original = agendaBtn.innerHTML;
     agendaBtn.disabled = true;
-    agendaBtn.innerHTML = `<i class="ph ph-spinner animate-spin text-lg"></i> Menyusun PDF...`;
+    agendaBtn.innerHTML = `<i class="ph ph-spinner animate-spin text-lg"></i> Mengunduh bln 0/12...`;
     try {
         const info = requireStudent(nisn);
+        let doneRekap = 0;
+        let doneJurnal = 0;
         const [absensiAll, jurnalAll] = await Promise.all([
-            fetchJson('getRekapGuru', info.namaGuru),
-            fetchJson('getJurnalGuru', info.namaGuru)
+            fetchAllMonthsData('getRekapGuru', info.namaGuru, (tambah) => {
+                doneRekap += tambah;
+                agendaBtn.innerHTML = `<i class="ph ph-spinner animate-spin text-lg"></i> Rekap ${doneRekap}/12, Jurnal ${doneJurnal}/12...`;
+            }),
+            fetchAllMonthsData('getJurnalGuru', info.namaGuru, (tambah) => {
+                doneJurnal += tambah;
+                agendaBtn.innerHTML = `<i class="ph ph-spinner animate-spin text-lg"></i> Rekap ${doneRekap}/12, Jurnal ${doneJurnal}/12...`;
+            })
         ]);
         const absensi = absensiAll.filter(a => String(a.nisn) === String(nisn));
         const jurnal = jurnalAll.filter(j => String(j.nisn) === String(nisn));
         if (!absensi.length && !jurnal.length) throw new Error('Tidak ada absensi atau jurnal untuk siswa ini.');
+        
+        agendaBtn.innerHTML = `<i class="ph ph-spinner animate-spin text-lg"></i> Menyusun PDF...`;
         const built = await createPdfBlob(agendaDocDefinition(info, buildAgendaRows(absensi, jurnal)));
         showPdfPreview(built.blob, `Agenda_Harian_PKL_${safeFilePart(info.student.nama)}.pdf`, 'Pratinjau Agenda Harian PDF');
     } catch (err) {
