@@ -88,6 +88,16 @@ Tambahkan entri baru di bagian atas saat ada perubahan. Format singkat: tanggal,
 - **Tujuan:** memenuhi tuntutan keluaran Agenda Harian, Rekap Tabel, & Jurnal agar berbentuk berkas PDF utuh (pdfmake).
 - **File:** `index.html`, `app.js`, dan menyisipkan aset lokal VFS baru `fonts/vfs_fonts.js` (Carlito/OFL 1.1).
 - **Hasil:** Seluruh ekspor dialihkan ke satu `modalPdfPreview`. Blob digenerate statis 1x (untuk frame iframe `src` + handler unduhan `a.download`). Perombakan label ("Kelas", "Tempat PKL"), spacing baris, `min-height`, & dotted lines Jurnal telah disematkan.
+### 2026-09-30 — Penyempurnaan PDF Terpadu, Batching Fetch, dan UI PDF
+- **Tujuan:** Migrasi tuntas dari ekspor XLSX, DOCX, dan print ke fitur eksklusif PDF (pdfmake). Menghapus library lawas (SheetJS/docx) dan menerapkan perbaikan format (margin, garis putus-putus) serta jaring pengaman jaringan.
+- **Tindakan:**
+  - Mengubah margin jilid ke kiri 2cm (57pt) di Agenda Harian & Jurnal.
+  - Memperbaiki layout `app.js` Jurnal dengan garis putus-putus presisi (16 baris).
+  - Menerapkan fitur **Batching/Cicilan (Fetch 1-12 bulan)** paralel untuk Cetak PDF guna memecah ukuran payload raksasa, dan meniadakan error Timeout (30s limit Google Apps Script) sekaligus menambahkan status progres unduhan di tombol.
+  - Membantu konfirmasi keandalan live link GitHub Pages (berjalan lancar di sisi guru).
+- **Status:** **SELESAI (Production-Ready)**. Semua commit telah di-*push* ke GitHub `main`.
+
+### 2026-09-24 — Penggantian sistem ekspor ke pdfmake
 - **Verifikasi:** Lolos check syntax DOM dan evaluasi struktur pdfmake (Audit). Uji data di production endpoints belum dilakukan.
 - **Status:** **SELESAI**. XLSX dan DOCX dihilangkan.
 
